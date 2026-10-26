@@ -1,0 +1,53 @@
+[package]
+name = "pota-auto-digimationator"
+version = "1.0.0"
+edition = "2021"
+description = "Calls Parks on the Air activators through WSJT-X"
+license = "GPL-3.0-or-later"
+authors = ["Dan Muntz (WD4DAN)"]
+publish = false
+
+[[bin]]
+name = "pota-auto-digimationator"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.37"
+skrifa = "0.44"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+regex = "1"
+socket2 = "0.5"
+ureq = "2.12"
+sha2 = "0.10"
+hmac = "0.12"
+num-bigint = "0.4"
+num-traits = "0.2"
+base64 = "0.22"
+getrandom = "0.2"
+raw-window-handle = "0.6"
+
+[dependencies.windows-sys]
+version = "0.61"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
+    "Win32_Media_Multimedia",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_UI_Controls_Dialogs",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[build-dependencies]
+winresource = "0.1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

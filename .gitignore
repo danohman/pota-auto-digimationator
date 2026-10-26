@@ -1,0 +1,18 @@
+# Per-user runtime files written by the app
+/data/
+*.tmp
+
+# Build output (Cargo.lock is kept: this is an app, not a library)
+/target/
+**/*.rs.bk
+*.pdb
+# rustfmt / cargo-mutants / profiling leftovers
+mutants.out*/
+*.profraw
+*.profdata
+flamegraph.svg
+perf.data*
+
+# Editor folders
+.vscode/
+.idea/
