@@ -589,9 +589,16 @@ impl App {
 
     /// ATT, NB and DNR off on the main receiver (the radio may remember them per band).
     fn rig_clean(&mut self, quiet: bool) {
-        if self.s.rig_clean {
+        let clean = self.s.rig_clean.then_some(false);
+        let power = self.s.rig_power;
+        if clean.is_some() || power.is_some() {
             self.rig_applied = true;
-            self.aclog.set_rig(Some(false), Some(false), Some(false), false, "ATT/NB/DNR off", quiet);
+            let why = match (clean, power) {
+                (Some(_), Some(w)) => format!("ATT/NB/DNR off, PWR {w} W"),
+                (None, Some(w)) => format!("PWR {w} W"),
+                _ => "ATT/NB/DNR off".to_string(),
+            };
+            self.aclog.set_rig(clean, clean, clean, power, false, &why, quiet);
         }
     }
 
@@ -610,7 +617,7 @@ impl App {
             self.log.clear(); // new band/mode: start the Activity log afresh
             self.static_rig.clear(); // until the rig has been set on the new band
         }
-        if !first && self.s.rig_clean {
+        if !first && (self.s.rig_clean || self.s.rig_power.is_some()) {
             // Let the radio finish changing band before sending, and once more in case
             // it restores its per-band memory late.
             self.after(1.5, Timer::RigClean(false));
@@ -630,8 +637,9 @@ impl App {
     /// On close, put back what the operator chose (ACLog can't read the rig's old state).
     fn rig_restore(&self, why: &str) {
         let (a, n, d) = self.restore_wants();
-        if self.rig_applied && (a.is_some() || n.is_some() || d.is_some()) {
-            self.aclog.set_rig(a, n, d, true, why, false);
+        let power = self.s.rig_power_close;
+        if self.rig_applied && (a.is_some() || n.is_some() || d.is_some() || power.is_some()) {
+            self.aclog.set_rig(a, n, d, power, true, why, false);
         }
     }
 
@@ -741,6 +749,9 @@ impl App {
             self.save_state();
             self.render_worked();
         }
+        if std::mem::take(&mut self.h.wanted_ready) && self.s.pop {
+            sound::play(sound::Kind::Pop, &self.s.pop_path);
+        }
         self.h.cq_stopped = false; // the Auto CQ/Answer button reads the hunter directly
     }
 
@@ -749,9 +760,6 @@ impl App {
     fn save_state(&mut self) {
         if !self.state_ready {
             return;
-        if std::mem::take(&mut self.h.wanted_ready) && self.s.pop {
-            sound::play(sound::Kind::Pop, &self.s.pop_path);
-        }
         }
         let path = self.dir.join("data").join("state.json");
         let tmp = self.dir.join("data").join("state.json.tmp");
@@ -947,7 +955,7 @@ impl App {
                 };
                 self.log(&t, Tag::Error);
             }
-            Event::Aclog(t, Tag::Info) if t.ends_with("ATT/NB/DNR off") => self.static_rig = t,
+            Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/DNR off") || t.starts_with("PWR ") => self.static_rig = t,
             Event::Aclog(t, tag) => self.log(&t, tag),
             Event::Retune(what, value, result) => {
                 if result != "ok" {
@@ -1134,7 +1142,7 @@ impl App {
             .name("retune".into())
             .spawn(move || {
                 if let Some(aclog) = rig {
-                    aclog.set_rig(a, n, d, true, &format!("QSY, setting {band_now} ATT/NB/DNR back to normal"), false);
+                    aclog.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/DNR back to normal"), false);
                     std::thread::sleep(Duration::from_millis(500));
                 }
                 for (i, (what, value)) in steps.into_iter().enumerate() {
@@ -2079,7 +2087,7 @@ impl App {
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
             let band = self.h.band().unwrap_or("?");
-            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", self.static_rig.trim_end_matches(" off")) };
+            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", cat_label(&self.static_rig)) };
             let text = format!("WSJT-X: {} on {} {} ({:.3} MHz){cat}", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
             info.push(StaticLine::new(self.stamp("wsjtx", &text), text));
         }
@@ -3289,4 +3297,16 @@ impl eframe::App for App {
             }
         }
     }
+}
+
+/// "ATT/NB/DNR off, PWR 50 W" -> "ATT/NB/DNR/PWR" (what the rig was set for, for the Current Info line).
+fn cat_label(done: &str) -> String {
+    let mut parts = Vec::new();
+    if done.contains("ATT/NB/DNR") {
+        parts.push("ATT/NB/DNR");
+    }
+    if done.contains("PWR") {
+        parts.push("PWR");
+    }
+    parts.join("/")
 }

@@ -507,6 +507,13 @@ fn stepper_labels_attempts(current: u32) -> (Vec<u32>, Vec<String>) {
     (v, labels)
 }
 
+/// "Leave as is" (0) then 5 to 100 W in 1 W steps.
+fn stepper_labels_power() -> (Vec<u32>, Vec<String>) {
+    let v: Vec<u32> = std::iter::once(0).chain(5..=100).collect();
+    let labels = v.iter().map(|w| if *w == 0 { "Leave".to_string() } else { format!("{w} W") }).collect();
+    (v, labels)
+}
+
 fn stepper_labels_snr(current: i32) -> (Vec<i32>, Vec<String>) {
     let mut v: Vec<i32> = (-24..=-6).step_by(2).collect();
     if current != NO_SNR_LIMIT && !v.contains(&current) {
@@ -839,6 +846,20 @@ impl Panel {
                 }
                 l.act.push(Do::Changed);
             }
+        }
+        l.section("Radio Tx power (Yaesu, via ACLog)");
+        let (vals, labels) = stepper_labels_power();
+        let cur = app.s.rig_power.unwrap_or(0);
+        let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
+        if let Some(i) = l.stepper_row("Tx power at start-up and QSY", "Set at start-up and after each band or mode change, 5 to 100 W", &labels, idx) {
+            app.s.rig_power = (vals[i] != 0).then_some(vals[i]);
+            l.act.push(Do::Changed);
+        }
+        let cur = app.s.rig_power_close.unwrap_or(0);
+        let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
+        if let Some(i) = l.stepper_row("Tx power when closing", "Set when the app closes, 5 to 100 W", &labels, idx) {
+            app.s.rig_power_close = (vals[i] != 0).then_some(vals[i]);
+            l.act.push(Do::Changed);
         }
     }
 

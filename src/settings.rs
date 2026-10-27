@@ -54,6 +54,10 @@ pub struct Settings {
     pub rig_restore_att: String,
     pub rig_restore_nb: String,
     pub rig_restore_dnr: String,
+    /// Tx power in watts (5 to 100) set at start-up and after each band/mode change; None = leave
+    pub rig_power: Option<u32>,
+    /// Tx power in watts set on close; None = leave
+    pub rig_power_close: Option<u32>,
     pub aclog_enabled: bool,
     pub aclog_host: String,
     pub aclog_port: u16,
@@ -65,14 +69,14 @@ pub struct Settings {
     /// pota.app account, for the hunt-count chips
     pub pota_user: String,
     pub pota_password: String,
-    /// "system" (follow Windows), "light" or "dark"
-    pub theme: String,
-    /// the UI font's size in points (the other fonts follow); 8 to 16
-    pub font_size: u32,
     /// respot the activator to pota.app after each logged QSO
     pub respot: bool,
     /// respot comment template; "" = no comment (default "{MODE}: S:{RST_SENT} / R:{RST_RCVD}") (see respot::PLACEHOLDERS)
     pub respot_message: String,
+    /// "system" (follow Windows), "light" or "dark"
+    pub theme: String,
+    /// the UI font's size in points (the other fonts follow); 8 to 16
+    pub font_size: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<Layout>,
     /// popped-out sections by name (see app::Card)
@@ -100,28 +104,30 @@ impl Default for Settings {
             cq_text: "CQ".into(),
             ding: true,
             ding_path: String::new(),
+            pop: true,
+            pop_path: String::new(),
             rig_clean: true,
             rig_restore_att: "on".into(),
             rig_restore_nb: "on".into(),
             rig_restore_dnr: "on".into(),
+            rig_power: None,
+            rig_power_close: None,
             aclog_enabled: false,
             aclog_host: "127.0.0.1".into(),
             aclog_port: 1100,
             adif_path: String::new(),
-            pop: true,
-            pop_path: String::new(),
             pounce_signoffs: true,
             new_parks_only: false,
             pota_user: String::new(),
             pota_password: String::new(),
+            respot: true,
+            respot_message: "{MODE}: S:{RST_SENT} / R:{RST_RCVD}".into(),
             theme: "system".into(),
             font_size: 10,
             layout: None,
             popouts: BTreeMap::new(),
             window: None,
             extra: Map::new(),
-            respot: true,
-            respot_message: "{MODE}: S:{RST_SENT} / R:{RST_RCVD}".into(),
         }
     }
 }

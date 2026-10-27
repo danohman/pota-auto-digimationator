@@ -77,11 +77,16 @@ pub fn parse_other_titles(response: &str) -> std::collections::HashMap<String, S
 
 /// Yaesu FTDX101D CAT strings for the main receiver (RA = attenuator, NB, NR = DNR);
 /// each argument is Some(true) (on), Some(false) (off) or None (leave alone).
-pub fn rig_commands(att: Option<bool>, nb: Option<bool>, dnr: Option<bool>) -> Vec<String> {
-    [("RA0", att), ("NB0", nb), ("NR0", dnr)]
+/// `power` is the transmit power in watts (PC, three digits, 5 to 100 on the FTDX101D).
+pub fn rig_commands(att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, power: Option<u32>) -> Vec<String> {
+    let mut v: Vec<String> = [("RA0", att), ("NB0", nb), ("NR0", dnr)]
         .iter()
         .filter_map(|(p, s)| s.map(|on| format!("{p}{};", on as u8)))
-        .collect()
+        .collect();
+    if let Some(w) = power {
+        v.push(format!("PC{:03};", w.clamp(5, 100)));
+    }
+    v
 }
 
 /// Sends QSOs to ACLog on worker threads; results are posted as `Event::Aclog`.
@@ -152,8 +157,8 @@ impl AclogClient {
 
     /// Send CAT commands through ACLog's SENDRIGCOMMAND on a worker thread (or right
     /// here with wait). ACLog can't return the rig's answer, so state can't be read.
-    pub fn set_rig(&self, att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, wait: bool, why: &str, quiet: bool) {
-        let cmds = rig_commands(att, nb, dnr);
+    pub fn set_rig(&self, att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, power: Option<u32>, wait: bool, why: &str, quiet: bool) {
+        let cmds = rig_commands(att, nb, dnr, power);
         if cmds.is_empty() {
             return;
         }
@@ -222,13 +227,20 @@ mod tests {
 
     #[test]
     fn all_off() {
-        assert_eq!(rig_commands(Some(false), Some(false), Some(false)), ["RA00;", "NB00;", "NR00;"]);
+        assert_eq!(rig_commands(Some(false), Some(false), Some(false), None), ["RA00;", "NB00;", "NR00;"]);
     }
 
     #[test]
     fn mixed_and_leave() {
-        assert_eq!(rig_commands(Some(true), None, Some(false)), ["RA01;", "NR00;"]);
-        assert!(rig_commands(None, None, None).is_empty());
+        assert_eq!(rig_commands(Some(true), None, Some(false), None), ["RA01;", "NR00;"]);
+        assert!(rig_commands(None, None, None, None).is_empty());
+    }
+
+    #[test]
+    fn power() {
+        assert_eq!(rig_commands(None, None, None, Some(5)), ["PC005;"]);
+        assert_eq!(rig_commands(None, None, None, Some(100)), ["PC100;"]);
+        assert_eq!(rig_commands(None, None, None, Some(250)), ["PC100;"]);
     }
 
     #[test]
