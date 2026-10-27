@@ -68,7 +68,7 @@ Run `target\release\pota-auto-digimationator.exe`.
 
 It opens with the button showing **Auto-Hunt Disabled** in red, and **Settings > Dry run** on. Click the button and confirm that you're at your station (you remain the control operator, and fully automated QSOs are prohibited) to turn it green (**Auto-Hunt Enabled**) and watch what it would call; the button adds "(Dry run)" while Dry run is on. Then turn Dry run off to let it transmit. All options are in the **Settings** panel (the gear button at the top right, or Ctrl+,). Changes are saved straight away. The window follows Windows' light or dark app mode; the sun/moon button next to the gear switches it, and **Settings > Appearance** picks Match Windows, Light or Dark.
 
-`settings.json`, `state.json` and `spots_cache.json` live in a `data` folder, and `assets/ding.mp3` (the QSO-logged sound) in an `assets` folder, both in the exe's folder or the first folder above it that holds `assets/ding.mp3`, so a build inside `target\release` uses the files in the project root. Files left in the app folder by older versions are moved into `data` at start-up.
+`settings.json`, `state.json` and `spots_cache.json` live in a `data` folder in the exe's folder (a build inside `target\release` of the source tree uses the project root instead). The QSO-logged sound is built into the exe, so the exe runs on its own. Files left in the app folder by older versions are moved into `data` at start-up.
 
 Tests: `cargo test`
 

@@ -759,7 +759,7 @@ impl App {
                     Message::QsoLogged(q) => {
                         let entry = self.h.handle_qso_logged(&q);
                         if self.s.ding {
-                            sound::play(&self.s.ding_path, &self.dir.join("assets").join("ding.mp3"));
+                            sound::play(&self.s.ding_path);
                         }
                         if self.s.aclog_enabled {
                             self.aclog.log_qso(q, entry);
@@ -2562,10 +2562,6 @@ impl App {
                 _ => {}
             }
         }
-    }
-
-    pub fn ding_default(&self) -> PathBuf {
-        self.dir.join("assets").join("ding.mp3")
     }
 }
 

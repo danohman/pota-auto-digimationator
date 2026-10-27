@@ -846,7 +846,7 @@ impl Panel {
         app.s.ding = v;
         let custom = app.s.ding_path.clone();
         let sub = if custom.is_empty() {
-            "Default (assets/ding.mp3)".to_string()
+            "Default (built in)".to_string()
         } else {
             std::path::Path::new(&custom).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(custom.clone())
         };
@@ -1101,13 +1101,13 @@ impl Panel {
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
                 Do::Test => {
-                    crate::sound::play(&app.s.ding_path, &app.ding_default());
+                    crate::sound::play(&app.s.ding_path);
                 }
                 Do::Choose => {
                     if let Some(path) = choose_sound_file() {
                         app.s.ding_path = path.clone();
                         app.settings_changed();
-                        crate::sound::play(&path, &app.ding_default());
+                        crate::sound::play(&path);
                     }
                 }
                 Do::ResetSound => {
