@@ -883,7 +883,7 @@ fn skips_stations_below_snr_threshold() {
     assert_eq!(s.h.min_snr, Some(-20));
     s.cycle(&[dec_at("CQ POTA K1WEAK FN42", -21, 10_515_000), dec_at("CQ POTA K2OK FN42", -20, 10_515_000)]);
     assert_eq!(s.replies(), ["CQ POTA K2OK FN42"]);
-    assert!(s.logged("K1WEAK -21 dB is below the -20 dB threshold"));
+    assert!(s.logged("-21 dB is below the -20 dB threshold"));
 }
 
 #[test]

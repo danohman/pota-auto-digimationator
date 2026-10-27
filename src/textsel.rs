@@ -123,9 +123,11 @@ impl TextSelect {
                 }
                 let chars: Vec<char> = run.text.chars().collect();
                 let cy = run.y + run.h / 2.0;
+                // a character counts when the selection reaches any part of it, so the one
+                // under the press (or the pointer) is included whichever half was hit
                 let picked = |i: usize| {
-                    let c = Pos2::new(run.x + (run.xs[i] + run.xs[i + 1]) / 2.0, cy);
-                    !before(c, a) && !before(b, c)
+                    let (l, r) = (Pos2::new(run.x + run.xs[i], cy), Pos2::new(run.x + run.xs[i + 1], cy));
+                    !before(r, a) && !before(b, l)
                 };
                 let mut i = 0;
                 while i < chars.len() {

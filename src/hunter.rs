@@ -10,7 +10,7 @@ use regex::Regex;
 use serde_json::{json, Value};
 
 use crate::cycles;
-use crate::pota_spots::{is_digital, SpotTable};
+use crate::pota_spots::{is_digital, Spot, SpotTable};
 use crate::wsjtx_udp::{Decode, QsoLogged, Status};
 
 pub const BANDS: [(&str, u64, u64); 12] = [
@@ -683,6 +683,34 @@ impl Hunter {
         out
     }
 
+    /// The parks behind one `new_parks_elsewhere` line, newest spot first, one entry per
+    /// park (its newest unskipped spot): the spot itself and whether the park is an ATNO.
+    pub fn new_park_spots(&self, band: &str, mode: &str) -> Vec<(Spot, bool)> {
+        let Some(spots) = &self.spots else { return Vec::new() };
+        let worked: HashSet<&str> =
+            self.worked.iter().map(|e| e.dupe_ref()).filter(|r| !r.is_empty()).collect();
+        let mut best: HashMap<&str, &Spot> = HashMap::new();
+        for sp in spots.all() {
+            let r = sp.reference.as_str();
+            if r.is_empty()
+                || sp.band != Some(band)
+                || sp.mode != mode
+                || worked.contains(r)
+                || !(self.park_is_new)(r)
+                || self.is_skipped(&base_call(&sp.activator), band, &sp.mode, &[r.to_string()])
+            {
+                continue;
+            }
+            let e = best.entry(r).or_insert(sp);
+            if sp.spot_time > e.spot_time {
+                *e = sp;
+            }
+        }
+        let mut out: Vec<(Spot, bool)> = best.into_values().map(|s| (s.clone(), s.qualifying == Some(false))).collect();
+        out.sort_by(|a, b| b.0.spot_time.cmp(&a.0.spot_time).then_with(|| a.0.reference.cmp(&b.0.reference)));
+        out
+    }
+
     /// Why the band or mode must not be changed right now, or None when it is safe.
     pub fn retune_blocker(&mut self) -> Option<String> {
         let Some(s) = self.status.clone() else {
@@ -968,6 +996,14 @@ impl Hunter {
         match a {
             Active::QsoRunning(call) => self.target_.as_ref().is_some_and(|t| &t.call == call && !t.completed),
             Active::CqStarted => self.cq_started,
+        }
+    }
+
+    /// Has the station of a QSO-running button already answered us?
+    pub fn has_answered(&self, a: &Active) -> bool {
+        match a {
+            Active::QsoRunning(call) => self.target_.as_ref().is_some_and(|t| &t.call == call && t.answered),
+            Active::CqStarted => false,
         }
     }
 
@@ -1334,27 +1370,6 @@ impl Hunter {
             format!(" {shown_ref} {shown_park}").trim_end().to_string()
         };
         let new = !shown_ref.is_empty() && (self.park_is_new)(&shown_ref);
-        if let Some(min) = self.min_snr {
-            if d.snr < min {
-                self.log_with(format!("{} {:+} dB is below the {:+} dB threshold; not calling  ({reason}{where_})",
-                    p.call, d.snr, min), Tag::Skip, Vec::new(), new);
-                return;
-            }
-        }
-        self.next_cand_id += 1;
-        let cand = Candidate {
-            id: self.next_cand_id,
-            decode: d.clone(),
-            call: call.clone(),
-            reason: reason.clone(),
-            ref_: ref_.clone(),
-            park: park.clone(),
-        };
-        self.pending.push(cand.clone());
-        // The operator can always call a candidate right now, switching from any target.
-        let received = self.now();
-        let mut actions = vec![Action { label: "Call now", kind: ActionKind::CallNow { cand, received }, active: None }];
-        actions.push(Self::skip_button(&call, &ref_));
         // "KD5QJQ (RR73) (-7 dB) at US-1091 (Lake Dardanelle State Park)"; (RR73) only for
         // sign-offs; only reasons other than a plain spot ("CQ POTA", "new park ...")
         // are spelled out.
@@ -1380,7 +1395,28 @@ impl Hunter {
             at = " [not spotted]".into();
         }
         let extra = if extra.is_empty() { String::new() } else { format!(", {extra}") };
-        self.log_with(format!("{}{sign} ({:+} dB){at}{extra}", p.call, d.snr), Tag::Cand, actions, new);
+        let line = format!("{}{sign} ({:+} dB){at}{extra}", p.call, d.snr);
+        if let Some(min) = self.min_snr {
+            if d.snr < min {
+                self.log_with(format!("{line} [{:+} dB is below the {:+} dB threshold; not calling]", d.snr, min), Tag::Skip, Vec::new(), new);
+                return;
+            }
+        }
+        self.next_cand_id += 1;
+        let cand = Candidate {
+            id: self.next_cand_id,
+            decode: d.clone(),
+            call: call.clone(),
+            reason: reason.clone(),
+            ref_: ref_.clone(),
+            park: park.clone(),
+        };
+        self.pending.push(cand.clone());
+        // The operator can always call a candidate right now, switching from any target.
+        let received = self.now();
+        let mut actions = vec![Action { label: "Call now", kind: ActionKind::CallNow { cand, received }, active: None }];
+        actions.push(Self::skip_button(&call, &ref_));
+        self.log_with(line, Tag::Cand, actions, new);
     }
 
     /// True when WSJT-X itself will deal with `call` calling us: the operator is

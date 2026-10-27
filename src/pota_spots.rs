@@ -46,6 +46,8 @@ pub struct Spot {
     pub reference: String,
     pub park_name: String,
     pub location: String,
+    /// `hasQualifyingActivation` (false = the park has never had a valid activation: ATNO)
+    pub qualifying: Option<bool>,
     /// UTC, e.g. "2026-10-25T02:45:50"
     pub spot_time: String,
 }
@@ -104,6 +106,11 @@ impl SpotTable {
                 reference: text(s, "reference"),
                 park_name: text(s, "name"),
                 location: text(s, "locationDesc"),
+                qualifying: match s.get("hasQualifyingActivation") {
+                    Some(Value::Bool(b)) => Some(*b),
+                    Some(Value::Number(n)) => n.as_f64().map(|x| x != 0.0),
+                    _ => None,
+                },
                 spot_time: text(s, "spotTime"),
             };
             let key = base_call(&call);

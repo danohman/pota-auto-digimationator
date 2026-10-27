@@ -52,8 +52,8 @@ pub const HUNT_ON_TEXT: &str = "Auto-Hunt Enabled";
 pub const HUNT_OFF_TEXT: &str = "Auto-Hunt Disabled";
 pub const CQ_ON_TEXT: &str = "Auto CQ/Answer Enabled";
 pub const CQ_OFF_TEXT: &str = "Auto CQ/Answer Disabled";
-pub const SPOTS_TITLE: &str = "POTA Spots (Not worked today)";
-pub const DONE_TITLE: &str = "POTA Spots (Worked/Skipped today)";
+pub const SPOTS_TITLE: &str = "Current POTA Spots (Not worked today)";
+pub const DONE_TITLE: &str = "Current POTA Spots (Worked/Skipped today)";
 /// a long park name
 pub const PARK_SAMPLE: &str = "JP-2105 Aichi Children's World Prefectural Park";
 
@@ -372,17 +372,24 @@ impl App {
         let theme_name = theme::resolve(&s.theme);
         let p = Palette::for_name(theme_name);
         let spot_cols = || {
-            vec![Col::new("ago", "Spot", "99m"), Col::new("heard", "Heard", "99m"),
-                 Col::new("call", "Call", "AE4XO/P (999)"), Col::new("freq", "kHz", "28074.0")]
+            vec![Col::new("ago", "Spot", "99m").tip("Age of the most recent spot on pota.app"),
+                 Col::new("heard", "Heard", "99m").tip("Age of the most recent WSJT-X decode"),
+                 Col::new("call", "Call", "AE4XO/P (999)").tip("Callsign of the activator"),
+                 Col::new("freq", "kHz", "28074.0").tip("Frequency of the activator")]
         };
+        let park_col = || Col::new("park", "Park", PARK_SAMPLE).tip("Park reference and name of the activator");
         let mut spots_cols = spot_cols();
-        spots_cols.push(Col::new("park", "Park", PARK_SAMPLE));
+        spots_cols.push(park_col());
         let mut done_cols = spot_cols();
-        done_cols.push(Col::new("ws", "W/S", "W/S"));
-        done_cols.push(Col::new("park", "Park", PARK_SAMPLE));
+        done_cols.push(Col::new("ws", "W/S", "W/S").tip("\"W\"orked or \"S\"kipped spot"));
+        done_cols.push(park_col());
         let worked_cols = vec![
-            Col::new("time", "Time", "00:00"), Col::new("call", "Call", "JN1JYD/P2"), Col::new("band", "Band", "160m"),
-            Col::new("mode", "Mode", "FT8"), Col::new("logged", "Log", "Log"), Col::new("park", "Park", PARK_SAMPLE),
+            Col::new("time", "Time", "00:00").tip("Logged QSO time"),
+            Col::new("call", "Call", "JN1JYD/P2").tip("Logged callsign"),
+            Col::new("band", "Band", "160m").tip("Logged band"),
+            Col::new("mode", "Mode", "FT8").tip("Logged mode"),
+            Col::new("logged", "Log", "Log").tip("Logged successful or not"),
+            Col::new("park", "Park", PARK_SAMPLE).tip("Logged park reference and name"),
         ];
         let mut app = App {
             dir: dir.clone(),
@@ -1099,8 +1106,11 @@ impl App {
         if self.typed.len() > 6 {
             self.typed.remove(0);
         }
-        let word: String = self.typed.iter().map(|t| t.1).collect();
-        if word == "konami" && now - self.typed[0].0 <= 1.0 {
+        // only a hash of the word is in the source (FNV-1a 64 of the 6 lowercase letters)
+        let hash = self.typed.iter().fold(0xcbf2_9ce4_8422_2325u64, |h, t| {
+            (h ^ t.1 as u64).wrapping_mul(0x100_0000_01b3)
+        });
+        if self.typed.len() == 6 && hash == 0x24ac_adea_4102_5e28 && now - self.typed[0].0 <= 1.0 {
             self.typed.clear(); // a repeat needs the whole word again
             if self.presence_off {
                 self.log("Konami! Presence checking is already disabled until the application is restarted.", Tag::Hunt);
@@ -1238,7 +1248,7 @@ impl App {
             let mut cells = vec![
                 Cell { text: ago(&s.spot_time, now), stale: age_minutes(&s.spot_time, now).unwrap_or(0) > STALE_MINUTES, ..Default::default() },
                 Cell::text(self.heard_text(&s.activator)),
-                Cell { text: s.activator.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&s.activator))), suffix, ..Default::default() },
+                Cell { text: s.activator.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&s.activator))), link_tip: Some("Click to open on pota.app".into()), suffix, ..Default::default() },
                 Cell::text(format!("{:.1}", s.frequency_khz)),
             ];
             if dim {
@@ -1252,6 +1262,11 @@ impl App {
             let mut park = Cell::text(format!("{} {}", s.reference, s.park_name).trim().to_string());
             if !s.reference.is_empty() {
                 park.link = Some(format!("https://pota.app/park/{}", s.reference));
+                park.link_tip = Some(if s.location.is_empty() {
+                    "Click to open on pota.app".to_string()
+                } else {
+                    format!("Park Location: {}\nClick to open on pota.app", s.location)
+                });
             }
             park.lead = lead;
             cells.push(park);
@@ -1283,7 +1298,11 @@ impl App {
             Some(if n != 0 {
                 Lead { text: format!("({n})"), chip: None, tip: Some(format!("You've hunted {} {n} time{}", s.reference, plural(n))) }
             } else {
-                Lead { text: "NEW".into(), chip: Some((p.new, p.new_text)), tip: Some(format!("You've never hunted {}", s.reference)) }
+                if s.qualifying == Some(false) {
+                    Lead { text: "ATNO".into(), chip: Some((p.atno, p.atno_text)), tip: Some(format!("All-time new one: {} has never had a valid activation, and you've never hunted it", s.reference)) }
+                } else {
+                    Lead { text: "NEW".into(), chip: Some((p.new, p.new_text)), tip: Some(format!("You've never hunted {}", s.reference)) }
+                }
             })
         };
         (suffix, lead)
@@ -1306,10 +1325,15 @@ impl App {
             let mut park_cell = Cell::text(park);
             if !e.ref_.is_empty() {
                 park_cell.link = Some(format!("https://pota.app/park/{}", e.ref_));
+                let location = self.h.spots.as_ref().and_then(|t| t.all().find(|s| s.reference == e.ref_ && !s.location.is_empty()).map(|s| s.location.clone()));
+                park_cell.link_tip = Some(match location {
+                    Some(l) => format!("Park Location: {l}\nClick to open on pota.app"),
+                    None => "Click to open on pota.app".to_string(),
+                });
             }
             let cells = vec![
                 Cell::text(t),
-                Cell { text: e.call.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&e.call))), ..Default::default() },
+                Cell { text: e.call.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&e.call))), link_tip: Some("Click to open on pota.app".into()), ..Default::default() },
                 Cell::text(e.band.clone()),
                 Cell::text(e.mode.clone()),
                 Cell { icon: Some(if e.logged { Icon::Ok } else { Icon::Bad }), ..Default::default() },
@@ -1404,6 +1428,10 @@ impl App {
             let on = h.is_active(a);
             if b.label == "Halt Tx" && !on {
                 remove.push(b.id); // no QSO in progress: no Halt Tx button
+                continue;
+            }
+            if b.label == "Skip" && h.has_answered(a) {
+                remove.push(b.id); // they answered us: no point skipping them any more
                 continue;
             }
             if b.used {
@@ -1739,6 +1767,19 @@ impl App {
         painter.rect_stroke(rect, 0.0, Stroke::new(1.0, self.p.border), StrokeKind::Inside);
     }
 
+    /// A card with a header band in its own colour behind the title row (height `hc`);
+    /// returns the row's top.
+    fn card_head(&self, ui: &Ui, rect: Rect, hc: f32) -> f32 {
+        self.card(ui, rect);
+        let inner = rect.shrink(1.0);
+        let hy = inner.top() + 10.0;
+        let band = Rect::from_min_max(inner.min, Pos2::new(inner.right(), hy + hc + 4.0));
+        let painter = ui.painter();
+        painter.rect_filled(band, 0.0, self.p.head);
+        painter.rect_filled(Rect::from_min_size(Pos2::new(band.left(), band.bottom()), Vec2::new(band.width(), 1.0)), 0.0, self.p.border);
+        hy
+    }
+
     /// A card's title (ttk label padding 2) at the head's content origin; returns its right edge.
     fn card_title(&self, ui: &Ui, x: f32, y: f32, h: f32, title: &str) -> f32 {
         let f = &self.f;
@@ -1826,11 +1867,11 @@ impl App {
     }
 
     fn draw_log_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let head_content = (f.heading.m.linespace + 4.0).max(2.0 + 6.0 + f.small.m.linespace + 2.0);
-        let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
+        let hy0 = self.card_head(ui, rect, head_content);
+        let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = match self.h.band() {
             Some(b) if !self.h.mode().is_empty() => format!("Activity ({b} {})", self.h.mode()),
             _ => "Activity".to_string(),
@@ -1887,16 +1928,15 @@ impl App {
             let next = match self.stats.next_fetch() {
                 Some(n) if n > now => {
                     let s = (n - now) as i64;
-                    format!("next refresh in {}m {:02}s", s / 60, s % 60)
+                    format!("refresh in {}m {:02}s", s / 60, s % 60)
                 }
                 Some(_) => "refreshing...".to_string(),
                 None => "no refresh scheduled".to_string(),
             };
             info.push(StaticLine::new(
                 hhmmss(DateTime::from_timestamp(c.fetched_at as i64, 0).unwrap_or_default()),
-                format!("pota.app hunt counts: {} parks hunted, {} activators worked", c.parks.len(), c.activators.len()),
+                format!("POTA: {} parks hunted, {} activators worked ({next})", c.parks.len(), c.activators.len()),
             ));
-            info.push(StaticLine::new(String::new(), format!("last refreshed {}, {next}", hhmmss(DateTime::from_timestamp(c.fetched_at as i64, 0).unwrap_or_default()))));
         } else {
             let text = self.pota_summary();
             let ts = self.stamp("pota-status", &text);
@@ -1939,11 +1979,11 @@ impl App {
     /// Its own card above the Activity log: current facts, timestamped like log lines,
     /// updated in place, as tall as its lines need.
     fn draw_info_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let f = self.f.clone();
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
+        let hy0 = self.card_head(ui, rect, hc);
+        let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         self.card_title(ui, hx, hy, hc, "Current Info");
         let info = self.build_info(ui, rect.width());
         let (click, _) = self.static_selection(ui, &info, inner, hy + hc + 6.0);
@@ -2127,7 +2167,7 @@ impl App {
     }
 
     fn notice_label(&self, n: usize, band: &str, mode: &str, newest: &str) -> String {
-        let newest_text = age_minutes(newest, Utc::now()).map(|a| format!(" (newest {a}m old)")).unwrap_or_default();
+        let newest_text = age_minutes(newest, Utc::now()).map(|a| format!(" (newest {a}m ago)")).unwrap_or_default();
         format!("{n} new park{} on {band} {mode} right now{newest_text}", if n != 1 { "s" } else { "" })
     }
 
@@ -2144,7 +2184,7 @@ impl App {
         let f = &self.f;
         let rowh = f.ui_bold.m.linespace + 2.0;
         let lx = 1.0 + PAD + 2.0;
-        let mut h = 6.0 + 4.0;
+        let mut h = 10.0 + f.heading.m.linespace + 4.0 + 6.0 + 4.0; // header, rows, bottom
         let mut wraps = vec![];
         for (band, mode, n, newest) in &self.notices {
             let w = measure(&f.ui_bold, &self.notice_label(*n, band, mode, newest));
@@ -2159,19 +2199,40 @@ impl App {
     /// Its own card above the Spots card: one line per other band/mode with parks we've
     /// never hunted, as tall as its lines need.
     fn draw_notices_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let f = self.f.clone();
         let p = self.p.clone();
         let inner = rect.shrink(1.0);
+        let hc = f.heading.m.linespace + 4.0;
+        let hy = self.card_head(ui, rect, hc);
+        let hx = inner.left() + PAD + 2.0;
+        let x = self.card_title(ui, hx, hy, hc, "POTA Spots (New to me) [on other band/mode]");
+        let total = self.notices.iter().map(|n| n.2).sum::<usize>().to_string();
+        self.pill(ui, x + 8.0, hy, hc, &total, "new-count");
         let (wraps, _) = self.notices_layout(ui, rect.width());
         let rowh = f.ui_bold.m.linespace + 2.0;
         let lx = inner.left() + PAD + 2.0;
-        let mut top = inner.top() + 6.0;
+        let mut top = hy + hc + 6.0;
         let mut retune = None;
         for (i, (band, mode, n, newest)) in self.notices.clone().into_iter().enumerate() {
             let ry = top + 1.0;
             let label = self.notice_label(n, &band, &mode, &newest);
             let w = ui::text(ui, ui.painter(), Pos2::new(lx + 1.0, ry + 1.0), &label, &f.ui_bold, p.new);
+            let label_r = Rect::from_min_size(Pos2::new(lx, ry), Vec2::new(w + 2.0, rowh));
+            let label_resp = ui.interact(label_r, Id::unique(("notice", i)), Sense::hover());
+            if label_resp.hovered() {
+                let now = Utc::now();
+                let lines: Vec<String> = self
+                    .h
+                    .new_park_spots(&band, &mode)
+                    .iter()
+                    .map(|(s, atno)| {
+                        format!("{} \u{2022} {} ago \u{2022} {} \u{2022} {} ({})", if *atno { "ATNO" } else { "NEW" }, ago(&s.spot_time, now), s.activator, s.reference, s.park_name)
+                    })
+                    .collect();
+                if !lines.is_empty() {
+                    self.tips.tip(&label_resp, &lines.join("\n"), 300, TipAt::Below(label_r));
+                }
+            }
             let qsy_text = format!("QSY to {band} {mode}");
             let b = Self::qsy_button(&f, &p, &qsy_text);
             let sz = b.size(ui);
@@ -2195,11 +2256,11 @@ impl App {
     }
 
     fn draw_spots_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
+        let hy0 = self.card_head(ui, rect, hc);
+        let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.spots_title.clone();
         let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.spots_count.clone();
@@ -2212,23 +2273,28 @@ impl App {
         self.spots_tree.show(ui, table_rect, &p, &f, &colors, &mut tips, &mut events);
         self.tips = tips;
         self.table_events(events);
-        // the "waiting" overlay over the list
         let (text, spin) = self.waiting.clone();
         if !text.is_empty() {
-            let lw = measure(&f.heading, &text) + 2.0;
-            let lh = f.heading.m.linespace + 2.0;
-            let bw = lw.max(if spin { 72.0 } else { 0.0 });
-            let bh = if spin { 72.0 + 14.0 + lh } else { lh };
-            let c = Pos2::new(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.55);
-            let b = Rect::from_center_size(c, Vec2::new(bw, bh));
-            let b = Rect::from_min_size(b.min.round(), b.size());
-            let painter = ui.painter();
-            painter.rect_filled(b, 0.0, p.surface);
-            if spin {
-                self.spinner(painter, Pos2::new(b.center().x, b.top() + 36.0));
-            }
-            ui::text(ui, painter, Pos2::new(b.center().x - lw / 2.0 + 1.0, b.bottom() - lh + 1.0), &text, &f.heading, p.muted);
+            self.list_overlay(ui, rect, &text, spin);
         }
+    }
+
+    /// The centred "waiting" / "No spots found" overlay over a spot list.
+    fn list_overlay(&mut self, ui: &mut Ui, rect: Rect, text: &str, spin: bool) {
+        let (p, f) = (self.p.clone(), self.f.clone());
+        let lw = measure(&f.heading, text) + 2.0;
+        let lh = f.heading.m.linespace + 2.0;
+        let bw = lw.max(if spin { 72.0 } else { 0.0 });
+        let bh = if spin { 72.0 + 14.0 + lh } else { lh };
+        let c = Pos2::new(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.55);
+        let b = Rect::from_center_size(c, Vec2::new(bw, bh));
+        let b = Rect::from_min_size(b.min.round(), b.size());
+        let painter = ui.painter();
+        painter.rect_filled(b, 0.0, p.surface);
+        if spin {
+            self.spinner(painter, Pos2::new(b.center().x, b.top() + 36.0));
+        }
+        ui::text(ui, painter, Pos2::new(b.center().x - lw / 2.0 + 1.0, b.bottom() - lh + 1.0), text, &f.heading, p.muted);
     }
 
     /// The big "waiting" spinner (72 px, 7 px line).
@@ -2300,11 +2366,11 @@ impl App {
     }
 
     fn draw_done_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
+        let hy0 = self.card_head(ui, rect, hc);
+        let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.done_title.clone();
         let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.done_count.clone();
@@ -2316,15 +2382,20 @@ impl App {
         self.done_tree.show(ui, table_rect, &p, &f, &colors, &mut tips, &mut events);
         self.tips = tips;
         self.table_events(events);
+        let (text, spin) = self.waiting.clone();
+        if !spin && !text.is_empty() {
+            self.list_overlay(ui, rect, &text, false); // "No spots found for <band> <mode>"
+        }
     }
 
     fn draw_worked_card(&mut self, ui: &mut Ui, rect: Rect) {
-        self.card(ui, rect);
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = (f.heading.m.linespace + 4.0).max(2.0 + 6.0 + f.small.m.linespace + 2.0);
-        let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
-        let x = self.card_title(ui, hx, hy, hc, "Worked today");
+        let hy0 = self.card_head(ui, rect, hc);
+        let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
+        let title = format!("Worked today ({})", Utc::now().format("%Y-%m-%d"));
+        let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.worked_count.clone();
         let x = self.pill(ui, x + 8.0, hy, hc, &count, "worked-count");
         let lh = f.small.m.linespace + 4.0;

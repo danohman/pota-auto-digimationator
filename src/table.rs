@@ -18,11 +18,18 @@ pub struct Col {
     pub name: &'static str,
     pub heading: &'static str,
     pub sample: String,
+    /// hover hint over the heading
+    pub tip: Option<&'static str>,
 }
 
 impl Col {
     pub fn new(name: &'static str, heading: &'static str, sample: &str) -> Self {
-        Col { name, heading, sample: sample.to_string() }
+        Col { name, heading, sample: sample.to_string(), tip: None }
+    }
+
+    pub fn tip(mut self, tip: &'static str) -> Self {
+        self.tip = Some(tip);
+        self
     }
 }
 
@@ -52,6 +59,8 @@ pub struct Lead {
 pub struct Cell {
     pub text: String,
     pub link: Option<String>,
+    /// hover hint over the link text
+    pub link_tip: Option<String>,
     pub icon: Option<Icon>,
     pub chip: Option<Chip>,
     /// after the text, outside the link, with an optional hover hint
@@ -249,8 +258,14 @@ impl Table {
         // heading
         let head_h = Self::heading_height(f);
         for &(i, x) in &stops {
-            ui::text_on(ui, &painter, Pos2::new(rect.left() + PADX + x, rect.top() + 6.0),
-                        &self.columns[i].heading.to_uppercase(), &f.table_heading, p.muted, p.surface);
+            let head = self.columns[i].heading.to_uppercase();
+            let pos = Pos2::new(rect.left() + PADX + x, rect.top() + 6.0);
+            ui::text_on(ui, &painter, pos, &head, &f.table_heading, p.muted, p.surface);
+            if let Some(tip) = self.columns[i].tip {
+                let hr = Rect::from_min_size(Pos2::new(pos.x, rect.top()), Vec2::new(measure(&f.table_heading, &head), head_h));
+                let resp = ui.interact(hr, Id::unique((self.id, "head", i)), Sense::hover());
+                tips.tip(&resp, tip, 300, TipAt::Below(hr));
+            }
         }
         let rule_y = rect.top() + head_h;
         painter.rect_filled(Rect::from_min_size(Pos2::new(rect.left(), rule_y), Vec2::new(text_w, 1.0)), 0.0, p.border);
@@ -375,6 +390,9 @@ impl Table {
                         let resp = ui.interact(rr.intersect(body), Id::unique((self.id, "link", ri, i)), Sense::click());
                         if resp.clicked() {
                             ui.ctx().open_url(egui::OpenUrl::new_tab(url));
+                        }
+                        if let Some(tip) = &c.link_tip {
+                            tips.tip(&resp, tip, 300, TipAt::Below(rr));
                         }
                     }
                     x += w;
