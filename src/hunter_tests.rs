@@ -1389,13 +1389,13 @@ fn candidate_always_gets_call_now_button() {
 }
 
 #[test]
-fn seen_pota_cq_makes_rr73_eligible() {
+fn seen_pota_cq_does_not_make_rr73_eligible() {
     let mut s = T::new();
     s.hs(st_tx(true, false, ""));
     s.cycle(&[dec("CQ POTA K1ABC FN42")]);
     s.hs(st());
     s.cycle(&[dec_at("W3XX K1ABC RR73", -5, 10_530_000)]);
-    assert_eq!(s.replies(), ["W3XX K1ABC RR73"]);
+    assert!(s.replies().is_empty());
 }
 
 #[test]

@@ -1316,8 +1316,6 @@ impl Hunter {
             "CQ POTA".to_string()
         } else if !spots.is_empty() {
             "spotted on pota.app".to_string()
-        } else if self.pota_cq_seen.contains(&(call.clone(), band.to_string())) {
-            "sent CQ POTA earlier".to_string()
         } else {
             return;
         };
