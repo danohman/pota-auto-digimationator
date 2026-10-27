@@ -388,6 +388,18 @@ impl ListenerShared {
     }
 }
 
+/// A listener that never listens (the setup wizard runs before anything is started);
+/// `App::begin_operation` swaps in a real one.
+pub fn idle_listener(group: &str, port: u16) -> Arc<ListenerShared> {
+    Arc::new(ListenerShared {
+        group: group.to_string(),
+        port,
+        sock: Mutex::new(None),
+        wsjtx_addr: Mutex::new(None),
+        stop: AtomicBool::new(true),
+    })
+}
+
 /// Receives WSJT-X multicast datagrams and posts `Event::Udp` messages. WSJT-X sends
 /// each datagram on every configured interface, so the same packet can arrive
 /// twice; exact duplicates within 2 s are dropped.

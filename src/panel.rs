@@ -12,6 +12,9 @@ use crate::sound::Kind;
 use crate::theme::{self, Font, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt};
 
+mod wizard;
+pub use wizard::Wizard;
+
 pub const NO_SNR_LIMIT: i32 = -999;
 /// what our automatic CQ says before call and grid
 pub const CQ_CHOICES: [&str; 3] = ["CQ", "CQ POTA", "CQ DX"];
@@ -131,6 +134,7 @@ enum Do {
     SaveAclog,
     SavePota,
     SaveRespot,
+    RunWizard,
 }
 
 /// A vertical stack of rows, drawn or only measured.
@@ -635,6 +639,16 @@ impl Panel {
                         let idx = sizes.iter().position(|n| *n == app.s.font_size).unwrap_or(2);
                         if let Some(i) = l.stepper_row("Font size", "Changes everywhere at once; 10 pt is the default", &labels, idx) {
                             l.act.push(Do::FontSize(sizes[i]));
+                        }
+                        l.section("Setup");
+                        let btn = l.small_button("Run setup wizard");
+                        let bsz = btn.size(l.ui);
+                        let rect = l.row("Setup wizard", "Walk through every setting again, with explanations", bsz.x + 16.0, bsz.y, p.text);
+                        if paint {
+                            let r = Rect::from_min_size(Pos2::new(rect.right() - bsz.x, rect.top() + ((rect.height() - bsz.y) / 2.0).floor()), bsz);
+                            if l.button(&btn, r, Id::unique("run-wizard"), true) {
+                                l.act.push(Do::RunWizard);
+                            }
                         }
                     }
                     Tab::About => self.about_tab(app, &mut l),
@@ -1183,6 +1197,10 @@ impl Panel {
                         self.show_page(app, Page::Main);
                     }
                 },
+                Do::RunWizard => {
+                    self.close(now);
+                    app.start_wizard();
+                }
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
                 Do::FontSize(pt) => app.set_font_size(ctx, pt),

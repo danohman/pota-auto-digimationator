@@ -31,6 +31,8 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 
 ## Getting started
 
+The first time it runs (no `data/settings.json` yet) a setup wizard walks you through every setting, explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
+
 ### 1. Set up WSJT-X
 
 The same instructions are in the app under **Settings > Connections > WSJT-X setup**, with a live connection indicator and the address and port it listens on.

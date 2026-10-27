@@ -285,8 +285,8 @@ pub struct App {
     rx: Receiver<Event>,
     post: Post,
     listener: Arc<Mutex<Arc<ListenerShared>>>,
-    poller: Arc<SpotPoller>,
-    stats: Arc<StatsPoller>,
+    poller: Option<Arc<SpotPoller>>,
+    stats: Option<Arc<StatsPoller>>,
     aclog: AclogClient,
     move_tx: Arc<AtomicBool>,
     pub h: Hunter,
@@ -369,6 +369,10 @@ pub struct App {
     demo_tip: bool,
     /// WSJT-X has reported a band since start-up: the waiting popup is gone for good
     wsjtx_seen: bool,
+    /// the setup wizard, while it is showing (first run, or re-run from Settings)
+    pub wizard: Option<crate::panel::Wizard>,
+    /// first run: settings.json does not exist yet, nothing is written until the wizard finishes
+    unsaved: bool,
 }
 
 pub fn mono_clock(t0: Instant) -> impl Fn() -> f64 {
@@ -435,9 +439,16 @@ impl App {
             let _ = tx.send(e);
             repaint.request_repaint();
         });
-        let listener = Arc::new(Mutex::new(wsjtx_udp::start_listener(post.clone(), &s.udp_group, s.udp_port)));
-        let poller = pota_spots::start_poller(post.clone(), dir.join("data").join("spots_cache.json"));
-        let stats = pota_auth::start_stats_poller(post.clone());
+        // First run: no settings.json yet. The setup wizard runs before anything is started
+        // (no listener, no pota.app polling); `begin_operation` starts them afterwards.
+        let first_run = !dir.join("data").join("settings.json").exists();
+        let listener = Arc::new(Mutex::new(if first_run {
+            wsjtx_udp::idle_listener(&s.udp_group, s.udp_port)
+        } else {
+            wsjtx_udp::start_listener(post.clone(), &s.udp_group, s.udp_port)
+        }));
+        let poller = (!first_run).then(|| pota_spots::start_poller(post.clone(), dir.join("data").join("spots_cache.json")));
+        let stats = (!first_run).then(|| pota_auth::start_stats_poller(post.clone()));
         let aclog = AclogClient::new(post.clone(), &s.aclog_host, s.aclog_port);
         let move_tx = Arc::new(AtomicBool::new(s.move_tx));
         let t0 = Instant::now();
@@ -562,18 +573,85 @@ impl App {
             demo: std::env::var("POTA_DEMO").map(|v| v.split(',').map(str::to_string).collect()).unwrap_or_default(),
             demo_tip: false,
             wsjtx_seen: false,
+            wizard: None,
+            unsaved: first_run,
         };
         // demo screenshots skip the WSJT-X popup unless they ask for it ("wait")
         app.wsjtx_seen = !app.demo.is_empty() && !app.demo.iter().any(|s| s == "wait");
         for t in [&mut app.spots_tree, &mut app.done_tree, &mut app.worked_tree] {
             t.size_from_samples(&app.f);
         }
-        app.seed_worked();
-        let (u, pw) = (app.s.pota_user.clone(), app.s.pota_password.clone());
-        app.apply_pota_login(&u, &pw, false);
-        app.after(2.0, Timer::RigClean(false));
-        app.render_worked();
+        if first_run {
+            app.wizard = Some(crate::panel::Wizard::new(&app.s, false));
+            app.demo_wizard();
+        } else {
+            app.start_data();
+        }
         app
+    }
+
+    /// Today's worked list, the pota.app login and the first rig setting (everything that
+    /// needs the settings to be final).
+    fn start_data(&mut self) {
+        self.seed_worked();
+        let (u, pw) = (self.s.pota_user.clone(), self.s.pota_password.clone());
+        self.apply_pota_login(&u, &pw, false);
+        self.after(2.0, Timer::RigClean(false));
+        self.render_worked();
+    }
+
+    /// The setup wizard is done (first run): start the WSJT-X listener and the pota.app
+    /// pollers with the chosen settings and begin operating normally.
+    fn begin_operation(&mut self) {
+        let new = wsjtx_udp::start_listener(self.post.clone(), &self.s.udp_group, self.s.udp_port);
+        let old = std::mem::replace(&mut *self.listener.lock().unwrap(), new);
+        old.stop();
+        self.poller = Some(pota_spots::start_poller(self.post.clone(), self.dir.join("data").join("spots_cache.json")));
+        self.stats = Some(pota_auth::start_stats_poller(self.post.clone()));
+        self.settings_changed();
+        self.start_data();
+    }
+
+    fn wizard_frame(&mut self, ctx: &egui::Context, ui: &mut Ui) {
+        let Some(mut w) = self.wizard.take() else { return };
+        if w.show(self, ctx, ui) {
+            if !w.is_rerun() {
+                self.begin_operation();
+            }
+        } else {
+            self.wizard = Some(w);
+        }
+    }
+
+    /// POTA_DEMO "wizard:N" (page number from 1) or "wizard:done": show that wizard page.
+    fn demo_wizard(&mut self) {
+        let steps: Vec<String> = self.demo.iter().filter_map(|s| s.strip_prefix("wizard:")).map(str::to_string).collect();
+        if let Some(w) = self.wizard.as_mut() {
+            for s in steps {
+                w.demo(&s);
+            }
+        }
+    }
+
+    /// Open the setup wizard again from Settings, starting from the current settings.
+    pub fn start_wizard(&mut self) {
+        self.wizard = Some(crate::panel::Wizard::new(&self.s, true));
+    }
+
+    /// The wizard's Finish: write settings.json (first run) or apply the changes to the
+    /// running app (re-run).
+    pub fn wizard_apply(&mut self) -> Result<(), String> {
+        if self.unsaved {
+            settings::save(&self.dir.join("data").join("settings.json"), &self.s).map_err(|e| format!("Could not save settings: {e}"))?;
+            self.unsaved = false;
+            return Ok(());
+        }
+        let (g, p) = (self.s.udp_group.clone(), self.s.udp_port);
+        self.apply_udp(&g, p);
+        let (u, pw) = (self.s.pota_user.clone(), self.s.pota_password.clone());
+        self.apply_pota_login(&u, &pw, false);
+        self.settings_changed();
+        Ok(())
     }
 
     pub fn now(&self) -> f64 {
@@ -729,6 +807,9 @@ impl App {
     }
 
     pub fn save_settings(&mut self) {
+        if self.unsaved {
+            return; // first run: settings.json is written when the wizard finishes
+        }
         if let Err(e) = settings::save(&self.dir.join("data").join("settings.json"), &self.s) {
             self.log(&format!("Could not save settings: {e}"), Tag::Error);
         }
@@ -828,7 +909,9 @@ impl App {
         *self.counts.borrow_mut() = None;
         self.spots_key = None;
         self.pota_status = if !user.is_empty() && !password.is_empty() { format!("Signing in as {user}") } else { String::new() };
-        self.stats.configure(&user, password);
+        if let Some(s) = &self.stats {
+            s.configure(&user, password);
+        }
         if save {
             self.save_settings();
         }
@@ -855,7 +938,7 @@ impl App {
             self.log(&format!("Dry run: would respot {} at {} on pota.app", r.activator, r.reference), Tag::Info);
             return;
         }
-        let (stats, post) = (self.stats.clone(), self.post.clone());
+        let (Some(stats), post) = (self.stats.clone(), self.post.clone()) else { return };
         let what = format!("{} at {}", r.activator, r.reference);
         std::thread::spawn(move || {
             match stats.token().and_then(|t| respot::post(&t, &body)) {
@@ -1522,7 +1605,7 @@ impl App {
                 (Some(b), m) if !m.is_empty() => format!(" • {} ({b} {m})", spots.count(b, &m)),
                 _ => String::new(),
             };
-            let wait = (self.poller.next_fetch() - epoch_now()) as i64;
+            let wait = self.poller.as_ref().map_or(0, |p| (p.next_fetch() - epoch_now()) as i64);
             let refresh = if wait <= 0 {
                 "refreshing...".to_string()
             } else if wait < 120 {
@@ -1637,7 +1720,7 @@ impl App {
         if active {
             self.activity();
         }
-        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Comma)) && self.dialog.is_none() && self.wsjtx_seen {
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Comma)) && self.dialog.is_none() && self.wsjtx_seen && self.wizard.is_none() {
             self.panel.toggle(self.now());
         }
     }
@@ -2103,7 +2186,7 @@ impl App {
             info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Add your pota.app login in Settings".into()) });
         } else if let Some(c) = counts.as_ref() {
             let now = epoch_now();
-            let next = match self.stats.next_fetch() {
+            let next = match self.stats.as_ref().and_then(|s| s.next_fetch()) {
                 Some(n) if n > now => {
                     let s = (n - now) as i64;
                     format!("refresh in {}m {:02}s", s / 60, s % 60)
@@ -2174,7 +2257,11 @@ impl App {
                 panel.open_at(self, now, Tab::Connect, Page::Pota);
                 self.panel = panel;
             }
-            Some(StaticClick::Refresh) => self.stats.refresh(),
+            Some(StaticClick::Refresh) => {
+                if let Some(s) = &self.stats {
+                    s.refresh();
+                }
+            }
             None => {}
         }
     }
@@ -3151,6 +3238,22 @@ impl eframe::App for App {
         self.ppp = ctx.pixels_per_point();
         self.style_egui(&ctx);
         self.title_bar();
+        if self.wizard.as_ref().is_some_and(|w| !w.is_rerun()) {
+            // first run: only the wizard, nothing else has been started
+            let now = self.now();
+            if now >= self.next_status {
+                self.next_status = now + 1.0;
+                if self.s.theme == "system" && theme::system_mode() != self.theme_name {
+                    self.apply_theme(&ctx, None);
+                }
+            }
+            if !self.demo.is_empty() && now > 3.0 {
+                self.run_demo(&ctx);
+            }
+            self.wizard_frame(&ctx, ui);
+            ctx.request_repaint_after(Duration::from_millis(100));
+            return;
+        }
         while let Ok(e) = self.rx.try_recv() {
             self.dispatch(e, &ctx);
         }
@@ -3213,6 +3316,7 @@ impl eframe::App for App {
             }
         }
         self.draw_wsjtx_wait(&ctx, screen);
+        self.wizard_frame(&ctx, ui); // (a re-run from Settings covers the window)
         if let Some(mut d) = self.dialog.take() {
             // the main window can't be used while a dialog is up
             egui::Area::new(Id::unique("modal-blocker"))
@@ -3286,8 +3390,12 @@ impl eframe::App for App {
     fn on_exit(&mut self) {
         self.closing = true;
         self.listener.lock().unwrap().stop();
-        self.poller.stop();
-        self.stats.stop();
+        if let Some(p) = &self.poller {
+            p.stop();
+        }
+        if let Some(s) = &self.stats {
+            s.stop();
+        }
         self.settings_changed();
         self.rig_restore("Closing, setting ATT/NB/DNR back to normal");
     }
