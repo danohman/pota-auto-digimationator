@@ -1831,7 +1831,11 @@ impl App {
         let inner = rect.shrink(1.0);
         let head_content = (f.heading.m.linespace + 4.0).max(2.0 + 6.0 + f.small.m.linespace + 2.0);
         let (hx, hy) = (inner.left() + PAD + 2.0, inner.top() + 10.0);
-        let title_right = self.card_title(ui, hx, hy, head_content, "Activity");
+        let title = match self.h.band() {
+            Some(b) if !self.h.mode().is_empty() => format!("Activity ({b} {})", self.h.mode()),
+            _ => "Activity".to_string(),
+        };
+        let title_right = self.card_title(ui, hx, hy, head_content, &title);
         let clear = Rnd::new("Clear", &f.small_bold).pill().pad(10.0, 2.0).colors(p.blue, p.blue_text).hover(p.blue_hover);
         let sz = clear.size(ui);
         let r = Rect::from_min_size(Pos2::new(inner.right() - PAD - sz.x, hy + ((head_content - sz.y) / 2.0).floor()), sz);
@@ -2128,7 +2132,7 @@ impl App {
     }
 
     fn qsy_button<'a>(f: &'a Fonts, p: &Palette, text: &'a str) -> Rnd<'a> {
-        Rnd::new(text, &f.ui_bold).pill().pad(7.0, 0.0).colors(p.new, p.new_text)
+        Rnd::new(text, &f.ui_bold).pill().pad(7.0, 0.0).colors(p.blue, p.blue_text).hover(p.blue_hover)
     }
 
     /// For each new-parks line whether its QSY button drops under the label (a narrow
