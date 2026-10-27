@@ -310,6 +310,21 @@ impl StatsPoller {
         self.cv.notify_all();
     }
 
+    /// A valid ID token for the saved account (refreshed or signed in again as needed).
+    /// Blocks on the network; call from a worker thread.
+    pub fn token(&self) -> Result<String, FetchError> {
+        let (user, password, mut tok) = {
+            let s = self.state.lock().unwrap();
+            (s.user.clone(), s.password.clone(), s.tokens.clone())
+        };
+        if user.is_empty() || password.is_empty() {
+            return Err(FetchError::Auth("not signed in to pota.app".into()));
+        }
+        let id = id_token(&Api::default(), &mut tok, &user, &password)?;
+        self.state.lock().unwrap().tokens = tok;
+        Ok(id)
+    }
+
     pub fn next_fetch(&self) -> Option<f64> {
         self.state.lock().unwrap().next_fetch
     }

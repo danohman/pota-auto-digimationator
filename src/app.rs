@@ -32,7 +32,7 @@ use crate::theme::{self, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt, Tips};
 use crate::wsjtx_gui;
 use crate::wsjtx_udp::{self, Decode, ListenerShared, Message};
-use crate::{logdialog, sound};
+use crate::{logdialog, respot, sound};
 
 pub const TITLE: &str = "POTA Auto-Digimationator";
 pub const PAD: f32 = 12.0;
@@ -826,6 +826,37 @@ impl App {
         }
     }
 
+    /// Respot the activator to pota.app after a logged QSO (setting `respot`). Needs the
+    /// pota.app login and a park confirmed for the QSO; the post runs on its own thread.
+    fn respot(&mut self, q: &wsjtx_udp::QsoLogged, entry: &WorkedEntry) {
+        if !self.s.respot {
+            return;
+        }
+        if entry.ref_.is_empty() || entry.ref_guessed {
+            self.log(&format!("Not respotting {}: no park confirmed for this QSO", entry.call), Tag::Info);
+            return;
+        }
+        let my_call = self.h.status.as_ref().map(|s| s.de_call.clone()).unwrap_or_default();
+        let r = respot::Respot::new(q, &my_call, &entry.ref_, &entry.band);
+        if r.spotter.is_empty() {
+            self.log("Not respotting: your call isn't known yet", Tag::Info);
+            return;
+        }
+        let body = r.body(&self.s.respot_message);
+        if self.s.dry_run {
+            self.log(&format!("Dry run: would respot {} at {} on pota.app", r.activator, r.reference), Tag::Info);
+            return;
+        }
+        let (stats, post) = (self.stats.clone(), self.post.clone());
+        let what = format!("{} at {}", r.activator, r.reference);
+        std::thread::spawn(move || {
+            match stats.token().and_then(|t| respot::post(&t, &body)) {
+                Ok(()) => post(Event::Aclog(format!("Respotted {what} on pota.app"), Tag::Worked)),
+                Err(e) => post(Event::Aclog(format!("Could not respot {what} on pota.app ({e})"), Tag::Error)),
+            }
+        });
+    }
+
     // --- WSJT-X ---------------------------------------------------------------------
 
     pub fn wsjtx_link(&self) -> (String, bool) {
@@ -887,6 +918,7 @@ impl App {
                         if self.s.ding {
                             sound::play(sound::Kind::Ding, &self.s.ding_path);
                         }
+                        self.respot(&q, &entry);
                         if self.s.aclog_enabled {
                             self.aclog.log_qso(q, entry);
                         }

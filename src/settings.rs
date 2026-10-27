@@ -69,6 +69,10 @@ pub struct Settings {
     pub theme: String,
     /// the UI font's size in points (the other fonts follow); 8 to 16
     pub font_size: u32,
+    /// respot the activator to pota.app after each logged QSO
+    pub respot: bool,
+    /// respot comment template; "" = no comment (default "{MODE}: S:{RST_SENT} / R:{RST_RCVD}") (see respot::PLACEHOLDERS)
+    pub respot_message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<Layout>,
     /// popped-out sections by name (see app::Card)
@@ -116,6 +120,8 @@ impl Default for Settings {
             popouts: BTreeMap::new(),
             window: None,
             extra: Map::new(),
+            respot: true,
+            respot_message: "{MODE}: S:{RST_SENT} / R:{RST_RCVD}".into(),
         }
     }
 }

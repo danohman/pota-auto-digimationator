@@ -7,6 +7,7 @@ use chrono::Datelike;
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::app::{App, ATTEMPT_MODES};
+use crate::respot;
 use crate::sound::Kind;
 use crate::theme::{self, Font, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt};
@@ -80,6 +81,7 @@ pub enum Page {
     Aclog,
     Wsjtx,
     Pota,
+    Respot,
 }
 
 /// Loggers a QSO can also be sent to: (key, name, one-line description, implemented).
@@ -102,6 +104,7 @@ pub struct Panel {
     aport: String,
     user: String,
     pass: String,
+    respot_msg: String,
     error: String,
     focus_first: bool,
     /// the About tab's lines as last drawn, and the selection (line, char) anchor and focus
@@ -127,6 +130,7 @@ enum Do {
     ResetUdp,
     SaveAclog,
     SavePota,
+    SaveRespot,
 }
 
 /// A vertical stack of rows, drawn or only measured.
@@ -579,6 +583,7 @@ impl Panel {
                 self.user = app.s.pota_user.clone();
                 self.pass = app.s.pota_password.clone();
             }
+            Page::Respot => self.respot_msg = app.s.respot_message.clone(),
             Page::Main => {}
         }
     }
@@ -623,6 +628,7 @@ impl Panel {
             Page::Wsjtx => self.wsjtx_page(app, &mut l),
             Page::Aclog => self.aclog_page(&mut l),
             Page::Pota => self.pota_page(app, &mut l),
+            Page::Respot => self.respot_page(&mut l),
         }
         (l.need_w, l.y - rect.top(), l.act)
     }
@@ -843,6 +849,11 @@ impl Panel {
         l.nav_row("WSJT-X setup", &format!("{g}:{port}  ·  {}", if ok { "connected" } else { "not receiving" }), Page::Wsjtx);
         l.section("pota.app");
         l.nav_row("pota.app account", &app.pota_summary(), Page::Pota);
+        let mut v = app.s.respot;
+        l.switch_row("Respot to pota.app after each QSO", "Posts the activator's spot after a logged QSO (needs the login above and a known park)", &mut v, true, 0.0);
+        app.s.respot = v;
+        let msg = &app.s.respot_message;
+        l.nav_row("Respot message", if msg.is_empty() { "None" } else { msg }, Page::Respot);
     }
 
     /// "Sound file" row with Test / Choose… / Reset buttons for one of the app's sounds.
@@ -1028,6 +1039,29 @@ impl Panel {
         }
     }
 
+    /// The optional comment sent with each respot.
+    fn respot_page(&mut self, l: &mut L) {
+        let (p, f) = (l.p, l.f);
+        l.header("Respot message", true);
+        l.y += 8.0;
+        let focus = self.focus_first && l.paint;
+        if l.paint {
+            self.focus_first = false;
+        }
+        let mut m = self.respot_msg.clone();
+        l.form(&mut [("Message", &mut m, 26.0, false)], 6.0, focus);
+        self.respot_msg = m;
+        let help = format!(
+            "Optional comment sent with each respot (blank = none). Placeholders, filled in from the logged QSO: {}.",
+            respot::PLACEHOLDERS.iter().map(|(k, v)| format!("{k} = {v}")).collect::<Vec<_>>().join("; "));
+        l.paragraph(&help, &f.small, p.muted, WIDTH - 40.0, 8.0, 4.0);
+        match l.buttons_right(&[("Save", true, "Cancel"), ("Cancel", false, "Cancel")], 10.0).as_deref() {
+            Some("Save") => l.act.push(Do::SaveRespot),
+            Some("Cancel") => l.act.push(Do::Back),
+            _ => {}
+        }
+    }
+
     fn footer_h(f: &Fonts) -> f32 {
         1.0 + f.small.m.linespace + 2.0 * (8.0 + BD)
     }
@@ -1091,6 +1125,7 @@ impl Panel {
             match self.page {
                 Page::Aclog => acts.push(Do::SaveAclog),
                 Page::Pota => acts.push(Do::SavePota),
+                Page::Respot => acts.push(Do::SaveRespot),
                 Page::Wsjtx => acts.push(Do::ApplyUdp),
                 Page::Main => {}
             }
@@ -1181,6 +1216,12 @@ impl Panel {
                 Do::SavePota => {
                     let (u, pw) = (self.user.clone(), self.pass.clone());
                     app.apply_pota_login(&u, &pw, true);
+                    self.tab = Tab::Connect;
+                    self.show_page(app, Page::Main);
+                }
+                Do::SaveRespot => {
+                    app.s.respot_message = self.respot_msg.trim().to_string();
+                    app.settings_changed();
                     self.tab = Tab::Connect;
                     self.show_page(app, Page::Main);
                 }
