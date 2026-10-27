@@ -12,6 +12,10 @@ use serde_json::{Map, Value};
 pub struct Layout {
     pub right_w: Option<i64>,
     pub split: Option<Vec<f64>>,
+    /// section order of the left and right columns (card names)
+    pub cols: Option<Vec<Vec<String>>>,
+    /// relative heights of the sections that share their column
+    pub weights: Option<BTreeMap<String, f64>>,
 }
 
 /// Where a section sits when it is popped out into its own window (points on screen).
@@ -59,6 +63,8 @@ pub struct Settings {
     pub pota_password: String,
     /// "system" (follow Windows), "light" or "dark"
     pub theme: String,
+    /// the UI font's size in points (the other fonts follow); 8 to 16
+    pub font_size: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<Layout>,
     /// popped-out sections by name (see app::Card)
@@ -99,6 +105,7 @@ impl Default for Settings {
             pota_user: String::new(),
             pota_password: String::new(),
             theme: "system".into(),
+            font_size: 10,
             layout: None,
             popouts: BTreeMap::new(),
             window: None,
@@ -158,6 +165,7 @@ pub fn load(path: &Path) -> Settings {
             s = serde_json::from_value(base).unwrap_or_default();
         }
     }
+    s.font_size = s.font_size.clamp(8, 16);
     // Older versions saved the stock WSJT-X log path as if it were a choice; detect.
     let old_default = adif_candidates().last().unwrap().display().to_string();
     if !s.adif_path.is_empty() && norm(&s.adif_path) == norm(&old_default) {

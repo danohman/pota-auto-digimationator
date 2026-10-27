@@ -52,31 +52,10 @@ fn app_dir() -> PathBuf {
     start
 }
 
-/// A small green tree as the window icon.
+/// The window icon: assets/icon64.rgba is the app icon at 64x64, raw RGBA (made from the
+/// same artwork as assets/icon.ico).
 fn icon() -> egui::IconData {
-    let size = 32usize;
-    let mut rgba = vec![0u8; size * size * 4];
-    for y in 0..size {
-        for x in 0..size {
-            let (fx, fy) = (x as f32, y as f32);
-            let cx = fx.clamp(7.0, size as f32 - 8.0);
-            let cy = fy.clamp(7.0, size as f32 - 8.0);
-            let inside = (fx - cx).powi(2) + (fy - cy).powi(2) <= 49.0;
-            let tree = ((5.0..=16.0).contains(&fy) && (fx - 15.5).abs() <= (fy - 4.0) * 0.75)
-                || ((11.0..=24.0).contains(&fy) && (fx - 15.5).abs() <= (fy - 9.0) * 0.75)
-                || (fy > 24.0 && fy <= 28.0 && (14.0..=17.0).contains(&fx));
-            let i = (y * size + x) * 4;
-            let c: [u8; 4] = if inside && tree {
-                [255, 255, 255, 255]
-            } else if inside {
-                [0x0d, 0x8a, 0x5c, 255]
-            } else {
-                [0, 0, 0, 0]
-            };
-            rgba[i..i + 4].copy_from_slice(&c);
-        }
-    }
-    egui::IconData { rgba, width: size as u32, height: size as u32 }
+    egui::IconData { rgba: include_bytes!("../assets/icon64.rgba").to_vec(), width: 64, height: 64 }
 }
 
 fn table_fit(f: &Fonts, cols: &[(&str, &str)]) -> f32 {
@@ -103,8 +82,8 @@ fn saved_geometry(s: &str) -> Option<(i32, i32, i32, i32)> {
 
 fn main() -> eframe::Result {
     let dir = app_dir();
-    let (fonts, defs) = Fonts::load();
     let s = settings::load(&settings::data_dir(&dir).join("settings.json"));
+    let (fonts, defs) = Fonts::load(s.font_size as f32);
     let scale = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() } as f32 / 96.0;
     let scale = if scale > 0.0 { scale } else { 1.0 };
 

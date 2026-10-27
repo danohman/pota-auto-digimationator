@@ -118,6 +118,7 @@ enum Do {
     Back,
     Changed,
     Theme(&'static str),
+    FontSize(u32),
     Test,
     Choose,
     ResetSound,
@@ -606,6 +607,14 @@ impl Panel {
                             }
                         }
                         l.y += sz.y + 8.0;
+                        l.section("Text size");
+                        l.y += 2.0;
+                        let sizes: Vec<u32> = (8..=16).collect();
+                        let labels: Vec<String> = sizes.iter().map(|n| format!("{n} pt")).collect();
+                        let idx = sizes.iter().position(|n| *n == app.s.font_size).unwrap_or(2);
+                        if let Some(i) = l.stepper_row("Font size", "Changes everywhere at once; 10 pt is the default", &labels, idx) {
+                            l.act.push(Do::FontSize(sizes[i]));
+                        }
                     }
                     Tab::About => self.about_tab(app, &mut l),
                 }
@@ -1100,6 +1109,7 @@ impl Panel {
                 },
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
+                Do::FontSize(pt) => app.set_font_size(ctx, pt),
                 Do::Test => {
                     crate::sound::play(&app.s.ding_path);
                 }

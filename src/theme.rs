@@ -405,6 +405,8 @@ pub struct Fonts {
     /// hover hints: Segoe UI 9 pt, like Windows' own tooltips
     pub tip: Font,
     pub has_icons: bool,
+    /// the faces' metrics, kept to rebuild the fonts at another size
+    metrics: Arc<HashMap<String, (u16, i16, i16)>>,
 }
 
 /// Tk's pixel size for a point size at 96 dpi (tk scaling 1.333).
@@ -460,7 +462,7 @@ fn load_face(l: &mut Loaded, family: &str, faces: &[&str], weight: i32, instance
 
 impl Fonts {
     /// Load the fonts (for `egui::Context::set_fonts`) and their metrics.
-    pub fn load() -> (Fonts, FontDefinitions) {
+    pub fn load(base_pt: f32) -> (Fonts, FontDefinitions) {
         let mut l = Loaded { defs: FontDefinitions::default(), metrics: HashMap::new() };
         // Glyphs the main fonts lack (e.g. ▾ ✓ ✗) come from the fonts Tk falls back to.
         for (name, face) in [("lucida-fallback", "Lucida Sans Unicode"), ("sym-fallback", "Segoe UI Symbol"), ("emoji-fallback", "Segoe UI Emoji")] {
@@ -496,10 +498,20 @@ impl Fonts {
             list.extend(l.defs.families.get(&base).cloned().unwrap_or_default());
             l.defs.families.insert(base, list);
         }
-        let metrics = l.metrics.clone();
+        let fonts = Fonts::build(Arc::new(l.metrics.clone()), has_icons, base_pt);
+        (fonts, l.defs)
+    }
 
-        let make = |fam: &str, pt: f32| {
-            let size = px(pt);
+    /// The same fonts at another base size (the UI font's point size; the others follow).
+    pub fn sized(&self, base_pt: f32) -> Fonts {
+        Fonts::build(self.metrics.clone(), self.has_icons, base_pt)
+    }
+
+    fn build(metrics: Arc<HashMap<String, (u16, i16, i16)>>, has_icons: bool, base_pt: f32) -> Fonts {
+        let d = base_pt - 10.0;
+        let m2 = metrics.clone();
+        let make = move |fam: &str, pt: f32| {
+            let size = px(pt + d);
             let (upem, asc, desc) = metrics.get(fam).copied().unwrap_or((2048, 2210, 514));
             let ascent = (asc as f32 * size / upem as f32).round();
             let descent = (desc as f32 * size / upem as f32).round();
@@ -522,8 +534,9 @@ impl Fonts {
             table_heading: make("ui-bold", 9.0),
             tip: make("tip", 9.0),
             has_icons,
+            metrics: m2,
         };
-        (fonts, l.defs)
+        fonts
     }
 }
 

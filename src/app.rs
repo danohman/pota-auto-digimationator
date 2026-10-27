@@ -36,6 +36,8 @@ use crate::{logdialog, sound};
 
 pub const TITLE: &str = "POTA Auto-Digimationator";
 pub const PAD: f32 = 12.0;
+/// corner radius of the cards
+const CARD_RADIUS: f32 = 6.0;
 pub const HEARD_SECONDS: f64 = 3.0;
 pub const HEARD_PERIOD: f64 = 0.6;
 pub const GLOW_PERIOD: f64 = 1.6;
@@ -194,16 +196,27 @@ impl Pop {
 
 /// Pane dividers, in pixels from the panes' origin.
 struct Panes {
-    /// width of the left (log) pane
+    /// width of the left column
     left: f32,
-    /// heights of the spots and done cards in the right column
-    a: f32,
-    b: f32,
     placed: bool,
     last: Vec2,
-    drag: Option<u8>,
-    /// height of the new-parks card above the spots card plus its gap (0 when there is none)
-    nh: f32,
+    /// the sections of the left and right columns in order (popped-out ones keep their place)
+    cols: [Vec<Card>; 2],
+    /// relative heights of the sections that share the rest of their column
+    weights: HashMap<Card, f32>,
+    /// a header being dragged to another place
+    grab: Option<Card>,
+}
+
+impl Panes {
+    fn default_cols() -> [Vec<Card>; 2] {
+        [vec![Card::Info, Card::Log], vec![Card::Notices, Card::Spots, Card::Done, Card::Worked]]
+    }
+
+    fn new() -> Self {
+        let weights = [(Card::Log, 1.0), (Card::Spots, 2.0), (Card::Done, 1.0), (Card::Worked, 1.0)].into_iter().collect();
+        Panes { left: 0.0, placed: false, last: Vec2::ZERO, cols: Self::default_cols(), weights, grab: None }
+    }
 }
 
 /// One line of the Activity card's static area.
@@ -344,6 +357,7 @@ pub struct App {
     last_outer: Option<Rect>,
     last_geometry: Option<Rect>,
     pub gear_rect: Rect,
+    logo: Option<egui::TextureHandle>,
     band_rect: Rect,
     mode_rect: Rect,
     ppp: f32,
@@ -526,7 +540,7 @@ impl App {
             in_pop: None,
             dialog: None,
             tips: Tips::default(),
-            panes: Panes { left: 0.0, a: 0.0, b: 0.0, placed: false, last: Vec2::ZERO, drag: None, nh: 0.0 },
+            panes: Panes::new(),
             next_tick: 0.0,
             next_status: 1.0,
             first_status_done: false,
@@ -539,6 +553,7 @@ impl App {
             last_outer: None,
             last_geometry: None,
             gear_rect: Rect::NOTHING,
+            logo: None,
             band_rect: Rect::NOTHING,
             mode_rect: Rect::NOTHING,
             ppp: 1.0,
@@ -637,6 +652,23 @@ impl App {
 
     pub fn set_theme(&mut self, ctx: &egui::Context, mode: &str) {
         self.apply_theme(ctx, Some(mode));
+        self.save_settings();
+    }
+
+    /// Change the UI font size (points; the other fonts follow) and redraw everything with it.
+    pub fn set_font_size(&mut self, ctx: &egui::Context, pt: u32) {
+        let pt = pt.clamp(8, 16);
+        if pt == self.s.font_size {
+            return;
+        }
+        self.s.font_size = pt;
+        self.f = self.f.sized(pt as f32);
+        self.log.relayout();
+        self.static_sel = None;
+        self.style_egui(ctx);
+        self.spots_key = None; // the lists measure their columns again
+        self.refresh_spots_list();
+        self.render_worked();
         self.save_settings();
     }
 
@@ -1585,17 +1617,16 @@ impl App {
     fn save_layout(&mut self, ctx: &egui::Context) {
         let minimized = ctx.input(|i| i.viewport().minimized) == Some(true);
         let total = self.panes.last;
-        let right_h = total.y - self.panes.nh;
-        if !self.panes.placed || minimized || right_h < 300.0 || total.x < 600.0 {
+        if !self.panes.placed || minimized || total.y < 300.0 || total.x < 600.0 {
             return; // not laid out (or minimised): the numbers would be junk
         }
         let right_w = (total.x - self.panes.left).round();
-        let split = [((self.panes.a / right_h) as f64 * 10000.0).round() / 10000.0,
-                     (((self.panes.b) / right_h) as f64 * 10000.0).round() / 10000.0];
-        if !(200.0 < right_w && right_w < total.x - 200.0 && 0.05 < split[0] && split[0] < split[1] && split[1] < 0.97) {
+        if !(200.0 < right_w && right_w < total.x - 200.0) {
             return;
         }
-        self.s.layout = Some(settings::Layout { right_w: Some(right_w as i64), split: Some(split.to_vec()) });
+        let cols = self.panes.cols.iter().map(|c| c.iter().map(|k| k.key().to_string()).collect()).collect();
+        let weights = self.panes.weights.iter().map(|(c, w)| (c.key().to_string(), (*w as f64 * 10000.0).round() / 10000.0)).collect();
+        self.s.layout = Some(settings::Layout { right_w: Some(right_w as i64), split: None, cols: Some(cols), weights: Some(weights) });
     }
 
     fn persist_layout(&mut self, ctx: &egui::Context) {
@@ -1625,15 +1656,15 @@ impl App {
         let inner_top = 10.0;
         let inner_h = hh - 20.0;
         let center = |hgt: f32| inner_top + ((inner_h - hgt) / 2.0).floor();
-        // logo: a white tree on a green rounded square
+        // logo: the app icon
         let lx = PAD + 4.0;
         let ly = center(36.0);
-        painter.rect_filled(Rect::from_min_size(Pos2::new(lx, ly), Vec2::splat(36.0)), ui::radius(9.0), p.accent);
-        let pt = |x: f32, y: f32| Pos2::new(lx + x, ly + y);
-        let fg = p.accent_text;
-        painter.add(egui::Shape::convex_polygon(vec![pt(18.0, 6.0), pt(26.0, 17.0), pt(10.0, 17.0)], fg, Stroke::new(1.0, fg)));
-        painter.add(egui::Shape::convex_polygon(vec![pt(18.0, 11.0), pt(28.0, 25.0), pt(8.0, 25.0)], fg, Stroke::new(1.0, fg)));
-        painter.rect_filled(Rect::from_min_max(pt(15.5, 24.5), pt(20.5, 31.5)), 0.0, fg);
+        let logo = self.logo.get_or_insert_with(|| {
+            let img = egui::ColorImage::from_rgba_unmultiplied([64, 64], include_bytes!("../assets/icon64.rgba"));
+            ui.ctx().load_texture("logo", img, egui::TextureOptions::LINEAR)
+        });
+        let logo_rect = Rect::from_min_size(Pos2::new(lx, ly), Vec2::splat(36.0));
+        painter.image(logo.id(), logo_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
         let tx = lx + 36.0 + 12.0;
         // right side: gear, theme, Auto-Hunt, Auto CQ/Answer (right to left)
         let icon_font = if f.has_icons { &f.icon } else { &f.ui_bold };
@@ -1850,19 +1881,31 @@ impl App {
 
     fn card(&self, ui: &Ui, rect: Rect) {
         let painter = ui.painter();
-        painter.rect_filled(rect, 0.0, self.p.surface);
-        painter.rect_stroke(rect, 0.0, Stroke::new(1.0, self.p.border), StrokeKind::Inside);
+        painter.rect_filled(rect, ui::radius(CARD_RADIUS), self.p.surface);
+        painter.rect_stroke(rect, ui::radius(CARD_RADIUS), Stroke::new(1.0, self.p.border), StrokeKind::Inside);
     }
 
     /// A card with a header band in its own colour behind the title row (height `hc`);
     /// returns the row's top.
-    fn card_head(&self, ui: &Ui, rect: Rect, hc: f32) -> f32 {
+    fn card_head(&mut self, ui: &mut Ui, card: Card, rect: Rect, hc: f32) -> f32 {
         self.card(ui, rect);
         let inner = rect.shrink(1.0);
         let hy = inner.top() + 10.0;
         let band = Rect::from_min_max(inner.min, Pos2::new(inner.right(), hy + hc + 4.0));
+        // dragging the band moves the section (not in its own window); the header's
+        // buttons and boxes are drawn after this, so they take their own clicks
+        if self.in_pop.is_none() {
+            let resp = ui.interact(band, Id::unique(("head-drag", card.key())), Sense::drag());
+            if resp.drag_started() {
+                self.panes.grab = Some(card);
+            }
+            if resp.hovered() && self.panes.grab.is_none() {
+                ui.ctx().set_cursor_icon(CursorIcon::Grab);
+            }
+        }
         let painter = ui.painter();
-        painter.rect_filled(band, 0.0, self.p.head);
+        let top = egui::CornerRadius { nw: CARD_RADIUS as u8 - 1, ne: CARD_RADIUS as u8 - 1, sw: 0, se: 0 };
+        painter.rect_filled(band, top, self.p.head);
         painter.rect_filled(Rect::from_min_size(Pos2::new(band.left(), band.bottom()), Vec2::new(band.width(), 1.0)), 0.0, self.p.border);
         hy
     }
@@ -1957,7 +2000,7 @@ impl App {
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let head_content = (f.heading.m.linespace + 4.0).max(2.0 + 6.0 + f.small.m.linespace + 2.0);
-        let hy0 = self.card_head(ui, rect, head_content);
+        let hy0 = self.card_head(ui, Card::Log, rect, head_content);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = match self.h.band() {
             Some(b) if !self.h.mode().is_empty() => format!("Activity ({b} {})", self.h.mode()),
@@ -2070,7 +2113,7 @@ impl App {
         let f = self.f.clone();
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let hy0 = self.card_head(ui, rect, hc);
+        let hy0 = self.card_head(ui, Card::Info, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         self.card_title(ui, hx, hy, hc, "Current Info");
         self.pop_button(ui, Card::Info, inner, hy, hc);
@@ -2292,7 +2335,7 @@ impl App {
         let p = self.p.clone();
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let hy = self.card_head(ui, rect, hc);
+        let hy = self.card_head(ui, Card::Notices, rect, hc);
         let hx = inner.left() + PAD + 2.0;
         let x = self.card_title(ui, hx, hy, hc, "POTA Spots (New to me) [on other band/mode]");
         let total = self.notices.iter().map(|n| n.2).sum::<usize>().to_string();
@@ -2349,7 +2392,7 @@ impl App {
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let hy0 = self.card_head(ui, rect, hc);
+        let hy0 = self.card_head(ui, Card::Spots, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.spots_title.clone();
         let x = self.card_title(ui, hx, hy, hc, &title);
@@ -2460,7 +2503,7 @@ impl App {
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = f.heading.m.linespace + 4.0;
-        let hy0 = self.card_head(ui, rect, hc);
+        let hy0 = self.card_head(ui, Card::Done, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.done_title.clone();
         let x = self.card_title(ui, hx, hy, hc, &title);
@@ -2484,7 +2527,7 @@ impl App {
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
         let hc = (f.heading.m.linespace + 4.0).max(2.0 + 6.0 + f.small.m.linespace + 2.0);
-        let hy0 = self.card_head(ui, rect, hc);
+        let hy0 = self.card_head(ui, Card::Worked, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = format!("Worked today ({})", Utc::now().format("%Y-%m-%d"));
         let x = self.card_title(ui, hx, hy, hc, &title);
@@ -2552,11 +2595,77 @@ impl App {
     }
 
     /// The panes (log | spots / done / worked) with their draggable dividers.
+    /// The saved section order and heights, or the defaults when they are missing or wrong.
+    fn load_arrangement(&mut self, total_h: f32) {
+        let layout = self.s.layout.clone();
+        let cols = layout.as_ref().and_then(|l| l.cols.as_ref()).and_then(|cols| {
+            let cols: Vec<Vec<Card>> = cols.iter().map(|c| c.iter().filter_map(|k| Card::from_key(k)).collect()).collect();
+            let mut all: Vec<Card> = cols.iter().flatten().copied().collect();
+            all.sort();
+            let ok = cols.len() == 2 && all == Card::ALL.to_vec();
+            ok.then(|| [cols[0].clone(), cols[1].clone()])
+        });
+        if let Some(c) = cols {
+            self.panes.cols = c;
+        }
+        if let Some(w) = layout.as_ref().and_then(|l| l.weights.as_ref()) {
+            for (k, v) in w {
+                if let (Some(c), true) = (Card::from_key(k), *v > 0.0) {
+                    self.panes.weights.insert(c, *v as f32);
+                }
+            }
+        } else if let Some(s) = layout.and_then(|l| l.split).filter(|s| s.len() == 2 && 0.1 < s[0] && s[0] < s[1] && s[1] < 0.95) {
+            // the old layout: two divider positions as fractions of the right column
+            let _ = total_h;
+            self.panes.weights.insert(Card::Spots, s[0] as f32);
+            self.panes.weights.insert(Card::Done, (s[1] - s[0]) as f32);
+            self.panes.weights.insert(Card::Worked, (1.0 - s[1]) as f32);
+        }
+    }
+
+    /// Stack a column's visible sections: Current Info and the new-parks card take the
+    /// height their lines need, the others share the rest by their weights. Returns the
+    /// rectangles and the dividers between neighbouring shared sections (card above, card
+    /// below, divider rectangle, the column's spare height, the sum of the weights).
+    #[allow(clippy::type_complexity)]
+    fn stack_column(&mut self, ui: &Ui, cards: &[Card], x: f32, w: f32, top: f32, bottom: f32) -> (Vec<(Card, Rect)>, Vec<(Card, Card, Rect, f32, f32)>) {
+        let col_h = bottom - top;
+        let auto: Vec<Option<f32>> = cards
+            .iter()
+            .map(|c| match c {
+                Card::Info if w > 120.0 => {
+                    let info = self.build_info(ui, w);
+                    Some(self.info_height(ui, &info).min(col_h * 0.55))
+                }
+                Card::Notices => Some(self.notices_layout(ui, w).1.min(col_h * 0.4)),
+                _ => None,
+            })
+            .collect();
+        let weight = |s: &Self, c: Card| s.panes.weights.get(&c).copied().unwrap_or(1.0).max(0.05);
+        let sum_w: f32 = cards.iter().zip(&auto).filter(|(_, a)| a.is_none()).map(|(c, _)| weight(self, *c)).sum();
+        let used: f32 = auto.iter().flatten().sum::<f32>() + 10.0 * cards.len().saturating_sub(1) as f32;
+        let spare = (col_h - used).max(0.0);
+        let mut y = top;
+        let mut rects: Vec<(Card, Rect)> = vec![];
+        for (c, a) in cards.iter().zip(&auto) {
+            let h = a.unwrap_or_else(|| (spare * weight(self, *c) / sum_w).floor());
+            rects.push((*c, Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h))));
+            y += h + 10.0;
+        }
+        let mut sashes = vec![];
+        for (i, pair) in rects.windows(2).enumerate() {
+            if auto[i].is_none() && auto[i + 1].is_none() {
+                sashes.push((pair[0].0, pair[1].0, Rect::from_min_size(Pos2::new(x, pair[0].1.bottom()), Vec2::new(w, 10.0)), spare, sum_w));
+            }
+        }
+        (rects, sashes)
+    }
+
     fn draw_panes(&mut self, ui: &mut Ui, area: Rect) {
+        const DROP_W: f32 = 140.0;
         let total = area.size();
         if !self.panes.placed && total.x >= 300.0 && total.y >= 300.0 {
-            let layout = self.s.layout.clone();
-            let saved_w = layout.as_ref().and_then(|l| l.right_w).map(|v| v as f32);
+            let saved_w = self.s.layout.as_ref().and_then(|l| l.right_w).map(|v| v as f32);
             let right_w = match saved_w {
                 Some(v) if 200.0 < v && v < total.x - 200.0 => v,
                 _ => self.fit_right_w + 5.0,
@@ -2564,107 +2673,67 @@ impl App {
             // neither side may start out collapsed, however narrow the window is
             let min_pane = (total.x * 0.3).min(200.0);
             self.panes.left = (total.x - right_w).clamp(min_pane, total.x - min_pane);
-            let split = layout.and_then(|l| l.split).filter(|s| s.len() == 2 && 0.1 < s[0] && s[0] < s[1] && s[1] < 0.95);
-            let (a, b) = match split {
-                Some(s) => (s[0] as f32, s[1] as f32),
-                None => (0.5, 0.75), // spots get half, the other two a quarter each
-            };
-            self.panes.a = (total.y * a).floor();
-            self.panes.b = (total.y * b).floor();
+            self.load_arrangement(total.y);
             self.panes.placed = true;
             self.panes.last = total;
         } else if self.panes.placed && total != self.panes.last {
-            // a resize: spread the change by the panes' weights (log 3 : right 2; 2 : 1 : 1)
+            // a resize: the columns share the change by their weights (left 3 : right 2)
             let d = total - self.panes.last;
             let min_pane = (total.x * 0.3).min(200.0);
             self.panes.left = (self.panes.left + d.x * 3.0 / 5.0).clamp(min_pane, total.x - min_pane);
-            let a = self.panes.a + d.y * 2.0 / 4.0;
-            let b = self.panes.b + d.y * 3.0 / 4.0;
-            self.panes.a = a.max(0.0);
-            self.panes.b = b.max(self.panes.a + 10.0);
             self.panes.last = total;
         }
-        // popped-out sections leave the main window; a column with nothing left goes away
-        let popped = |c: Card| self.is_popped(c);
-        let (info_out, log_out, notices_out) = (popped(Card::Info), popped(Card::Log), popped(Card::Notices));
-        let vis = [!popped(Card::Spots), !popped(Card::Done), !popped(Card::Worked)];
-        let left_gone = info_out && log_out;
-        let right_gone = !vis.iter().any(|v| *v) && (notices_out || self.notices.is_empty());
-        let left_w = if left_gone { 0.0 } else if right_gone { total.x } else { self.panes.left.round() };
-        // the new-parks card takes its height from the Spots card, so the others keep theirs
-        let rw0 = total.x - left_w - 10.0;
-        let nh = if rw0 > 150.0 && !self.notices.is_empty() && !notices_out { (self.notices_layout(ui, rw0).1).min(total.y * 0.4) + 10.0 } else { 0.0 };
-        if (nh - self.panes.nh).abs() > 0.5 {
-            let d = nh - self.panes.nh;
-            self.panes.a = (self.panes.a - d).max(0.0);
-            self.panes.b = (self.panes.b - d).max(self.panes.a + 10.0);
-            self.panes.nh = nh;
-        }
-        let pz = &self.panes;
-        let (a, b) = (pz.a.round(), pz.b.round());
-        let left = left_w;
-        let col = area.top() + nh;
-        // the Current Info card sits above the Activity log and takes its height from it
-        let info_h = if left > 120.0 && !info_out {
-            let info = self.build_info(ui, left);
-            self.info_height(ui, &info).min(total.y * 0.55)
-        } else {
-            0.0
+        // the sections in the main window, per column (popped-out ones and an empty
+        // new-parks card are left out)
+        let shown = |s: &Self, c: Card| !s.is_popped(c) && !(c == Card::Notices && s.notices.is_empty());
+        let vis: [Vec<Card>; 2] = [0, 1].map(|i| self.panes.cols[i].iter().copied().filter(|c| shown(self, *c)).collect());
+        let grabbing = self.panes.grab.is_some();
+        let (e0, e1) = (vis[0].is_empty(), vis[1].is_empty());
+        // while a header is being dragged an empty column shows a strip to drop it on
+        let (left_w, rx, rw) = match (e0, e1) {
+            (true, true) => (0.0, area.left(), 0.0),
+            (true, false) if grabbing => (DROP_W, area.left() + DROP_W + 10.0, total.x - DROP_W - 10.0),
+            (true, false) => (0.0, area.left(), total.x),
+            (false, true) if grabbing => (total.x - DROP_W - 10.0, area.right() - DROP_W, DROP_W),
+            (false, true) => (total.x, area.right() + 10.0, 0.0),
+            _ => (self.panes.left.round(), area.left() + self.panes.left.round() + 10.0, total.x - self.panes.left.round() - 10.0),
         };
-        let info_rect = Rect::from_min_size(area.min, Vec2::new(left, info_h));
-        let log_top = if info_h > 0.0 { area.top() + info_h + 10.0 } else { area.top() };
-        let log_rect = if log_out {
-            Rect::NOTHING
-        } else {
-            Rect::from_min_max(Pos2::new(area.left(), log_top), Pos2::new(area.left() + left, area.bottom()))
-        };
-        let rx = if left_gone { area.left() } else { area.left() + left + 10.0 };
-        let rw = if right_gone { 0.0 } else if left_gone { total.x } else { total.x - left - 10.0 };
-        let notices_rect = if notices_out { Rect::NOTHING } else { Rect::from_min_size(Pos2::new(rx, area.top()), Vec2::new(rw, (nh - 10.0).max(0.0))) };
-        // the three lists share the rest of the column: the dividers' sizes when all are
-        // there, else their sizes scaled up to fill it
-        let (spots_rect, done_rect, worked_rect);
-        if vis.iter().all(|v| *v) {
-            spots_rect = Rect::from_min_size(Pos2::new(rx, col), Vec2::new(rw, a));
-            done_rect = Rect::from_min_max(Pos2::new(rx, col + a + 10.0), Pos2::new(rx + rw, col + b));
-            worked_rect = Rect::from_min_max(Pos2::new(rx, col + b + 10.0), Pos2::new(rx + rw, area.bottom()));
-        } else {
-            let column_h = area.bottom() - col;
-            let weights = [a.max(20.0), (b - a - 10.0).max(20.0), (column_h - b - 10.0).max(20.0)];
-            let n = vis.iter().filter(|v| **v).count();
-            let sum: f32 = (0..3).filter(|i| vis[*i]).map(|i| weights[i]).sum();
-            let avail = (column_h - 10.0 * n.saturating_sub(1) as f32).max(0.0);
-            let mut y = col;
-            let mut rects = [Rect::NOTHING; 3];
-            for i in 0..3 {
-                if vis[i] {
-                    let h = (avail * weights[i] / sum).floor();
-                    rects[i] = Rect::from_min_size(Pos2::new(rx, y), Vec2::new(rw, h));
-                    y += h + 10.0;
-                }
+        let mut placed: Vec<(Card, Rect)> = vec![];
+        let mut sashes: Vec<(Card, Card, Rect, f32, f32)> = vec![];
+        for (i, (x, w)) in [(area.left(), left_w), (rx, rw)].into_iter().enumerate() {
+            if vis[i].is_empty() || w <= 2.0 {
+                continue;
             }
-            (spots_rect, done_rect, worked_rect) = (rects[0], rects[1], rects[2]);
+            let (r, s) = self.stack_column(ui, &vis[i], x, w, area.top(), area.bottom());
+            placed.extend(r);
+            sashes.extend(s);
         }
-        // dividers
-        let mut sashes = vec![];
-        if !left_gone && !right_gone {
-            sashes.push((0u8, Rect::from_min_size(Pos2::new(area.left() + left, area.top()), Vec2::new(10.0, total.y)), CursorIcon::ResizeHorizontal));
-        }
-        if vis.iter().all(|v| *v) {
-            sashes.push((1u8, Rect::from_min_size(Pos2::new(rx, col + a), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical));
-            sashes.push((2u8, Rect::from_min_size(Pos2::new(rx, col + b), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical));
-        }
-        for (i, r, cursor) in sashes {
-            let resp = ui.interact(r, Id::unique(("sash", i)), Sense::drag());
+        // dividers: between the columns, and between neighbouring shared sections
+        if !e0 && !e1 {
+            let r = Rect::from_min_size(Pos2::new(area.left() + left_w, area.top()), Vec2::new(10.0, total.y));
+            let resp = ui.interact(r, Id::unique("sash-cols"), Sense::drag());
             if resp.hovered() || resp.dragged() {
-                ui.ctx().set_cursor_icon(cursor);
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal);
             }
             if resp.dragged() {
-                let d = resp.drag_delta();
-                match i {
-                    0 => self.panes.left = (self.panes.left + d.x).clamp(0.0, total.x - 10.0),
-                    1 => self.panes.a = (self.panes.a + d.y).clamp(0.0, self.panes.b - 10.0),
-                    _ => self.panes.b = (self.panes.b + d.y).clamp(self.panes.a + 10.0, total.y - nh - 10.0),
+                self.panes.left = (self.panes.left + resp.drag_delta().x).clamp(0.0, total.x - 10.0);
+            }
+            if resp.drag_stopped() {
+                self.layout_due = Some(self.now() + 0.5);
+            }
+        }
+        for (i, (above, below, r, spare, sum_w)) in sashes.into_iter().enumerate() {
+            let resp = ui.interact(r, Id::unique(("sash-rows", i)), Sense::drag());
+            if resp.hovered() || resp.dragged() {
+                ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+            }
+            if resp.dragged() && spare > 1.0 {
+                let dw = resp.drag_delta().y * sum_w / spare;
+                let (wa, wb) = (self.panes.weights.get(&above).copied().unwrap_or(1.0), self.panes.weights.get(&below).copied().unwrap_or(1.0));
+                let min_w = 0.05 * sum_w;
+                if wa + dw >= min_w && wb - dw >= min_w {
+                    self.panes.weights.insert(above, wa + dw);
+                    self.panes.weights.insert(below, wb - dw);
                 }
             }
             if resp.drag_stopped() {
@@ -2673,22 +2742,73 @@ impl App {
         }
         // each card draws inside its own rectangle (nothing spills out in a narrow window)
         let outer_clip = ui.clip_rect();
-        let cards = [
-            (Card::Info, info_rect, left > 120.0 && info_h > 2.0),
-            (Card::Log, log_rect, log_rect.width() > 2.0 && log_rect.height() > 2.0),
-            (Card::Notices, notices_rect, notices_rect.height() > 2.0 && rw > 2.0),
-            (Card::Spots, spots_rect, spots_rect.height() > 2.0 && rw > 2.0),
-            (Card::Done, done_rect, done_rect.height() > 2.0 && rw > 2.0),
-            (Card::Worked, worked_rect, worked_rect.height() > 2.0 && rw > 2.0),
-        ];
-        for (card, rect, show) in cards {
-            if show {
-                self.card_rects.insert(card, rect);
-                ui.set_clip_rect(outer_clip.intersect(rect));
-                self.draw_card(ui, card, rect);
+        for (card, rect) in &placed {
+            if rect.width() > 2.0 && rect.height() > 2.0 {
+                self.card_rects.insert(*card, *rect);
+                ui.set_clip_rect(outer_clip.intersect(*rect));
+                self.draw_card(ui, *card, *rect);
             }
         }
         ui.set_clip_rect(outer_clip);
+        if let Some(card) = self.panes.grab {
+            self.move_card(ui, card, &vis, &placed, area, rx, [(area.left(), left_w), (rx, rw)]);
+        }
+    }
+
+    /// A header is being dragged: show where it would land and move it on release.
+    #[allow(clippy::too_many_arguments)]
+    fn move_card(&mut self, ui: &mut Ui, card: Card, vis: &[Vec<Card>; 2], placed: &[(Card, Rect)], area: Rect, rx: f32, cols_x: [(f32, f32); 2]) {
+        let (p, f) = (self.p.clone(), self.f.clone());
+        let down = ui.input(|i| i.pointer.primary_down());
+        let Some(pos) = ui.input(|i| i.pointer.interact_pos()) else {
+            self.panes.grab = None;
+            return;
+        };
+        ui.ctx().set_cursor_icon(CursorIcon::Grabbing);
+        let col = if pos.x < rx - 5.0 { 0 } else { 1 };
+        let rect_of = |c: Card| placed.iter().find(|(k, _)| *k == c).map(|(_, r)| *r);
+        let others: Vec<Card> = vis[col].iter().copied().filter(|c| *c != card).collect();
+        let idx = others.iter().filter(|c| rect_of(**c).is_some_and(|r| r.center().y < pos.y)).count();
+        // the marker: a line before the card the dragged one would land above, or after the last
+        let (cx, cw) = cols_x[col];
+        let (mx, mw) = if cw > 2.0 { (cx, cw) } else { (area.left(), 140.0) };
+        let y = match (others.get(idx).and_then(|c| rect_of(*c)), others.last().and_then(|c| rect_of(*c))) {
+            (Some(r), _) => r.top() - 5.0,
+            (None, Some(r)) => r.bottom() + 5.0,
+            (None, None) => area.top() + 2.0,
+        };
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Tooltip, Id::new("card-drag")));
+        if others.is_empty() {
+            painter.rect_stroke(Rect::from_min_size(Pos2::new(mx, area.top()), Vec2::new(mw, area.height())), 0.0, Stroke::new(2.0, p.accent), StrokeKind::Inside);
+        } else {
+            painter.rect_filled(Rect::from_min_size(Pos2::new(mx, y - 2.0), Vec2::new(mw, 4.0)), 2.0, p.accent);
+        }
+        let label = card.title();
+        let w = measure(&f.heading, label) + 20.0;
+        let r = Rect::from_min_size(pos + Vec2::new(12.0, 12.0), Vec2::new(w, f.heading.m.linespace + 12.0));
+        painter.rect_filled(r, 4.0, p.surface);
+        painter.rect_stroke(r, 4.0, Stroke::new(1.0, p.accent), StrokeKind::Inside);
+        ui::text(ui, &painter, r.min + Vec2::new(10.0, 6.0), label, &f.heading, p.text);
+        ui.ctx().request_repaint();
+        let esc = ui.input(|i| i.key_pressed(Key::Escape));
+        if down && !esc {
+            return;
+        }
+        self.panes.grab = None;
+        if esc {
+            return;
+        }
+        // drop: take it out of its column and put it in before `others[idx]` (or after the last)
+        for c in self.panes.cols.iter_mut() {
+            c.retain(|k| *k != card);
+        }
+        let list = &mut self.panes.cols[col];
+        let at = match others.get(idx) {
+            Some(next) => list.iter().position(|k| k == next).unwrap_or(list.len()),
+            None => others.last().and_then(|last| list.iter().position(|k| k == last)).map(|i| i + 1).unwrap_or(list.len()),
+        };
+        list.insert(at, card);
+        self.layout_due = Some(self.now() + 0.5);
     }
 
     // --- sections in their own windows ---------------------------------------------------

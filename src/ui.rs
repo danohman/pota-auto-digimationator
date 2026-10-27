@@ -780,7 +780,7 @@ mod tests {
     #[test]
     #[ignore]
     fn run_render_cost() {
-        let (f, _) = crate::theme::Fonts::load();
+        let (f, _) = crate::theme::Fonts::load(10.0);
         let cells = ["10:56", "0m", "N8UC", "7074.0", "US-1511 Kal-Haven Trail State Park"];
         let t = std::time::Instant::now();
         let n = 200;

@@ -140,6 +140,14 @@ impl LogView {
         }
     }
 
+    /// The fonts changed size: every line is wrapped again at the next draw.
+    pub fn relayout(&mut self) {
+        for l in self.lines.iter_mut() {
+            l.laid = None;
+        }
+        self.sel = None;
+    }
+
     pub fn clear(&mut self) {
         self.lines.clear();
         self.sel = None;
