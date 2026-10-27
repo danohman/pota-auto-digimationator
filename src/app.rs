@@ -2454,8 +2454,8 @@ impl App {
         let mut wraps = vec![];
         for (band, mode, n, newest) in &self.notices {
             let w = measure(&f.ui_bold, &self.notice_label(*n, band, mode, newest));
-            let bw = Self::qsy_button(f, &self.p, &format!("QSY to {band} {mode}")).size(ui).x;
-            let wrap = lx + w + 12.0 + bw > width - 1.0 - PAD;
+            let bw = Self::qsy_button(f, &self.p, "QSY").size(ui).x;
+            let wrap = lx + bw + 8.0 + w + 2.0 > width - 1.0 - PAD;
             wraps.push(wrap);
             h += rowh + 2.0 + if wrap { rowh + 2.0 } else { 0.0 };
         }
@@ -2483,8 +2483,19 @@ impl App {
         for (i, (band, mode, n, newest)) in self.notices.clone().into_iter().enumerate() {
             let ry = top + 1.0;
             let label = self.notice_label(n, &band, &mode, &newest);
-            let w = ui::text(ui, ui.painter(), Pos2::new(lx + 1.0, ry + 1.0), &label, &f.ui_bold, p.new);
-            let label_r = Rect::from_min_size(Pos2::new(lx, ry), Vec2::new(w + 2.0, rowh));
+            let b = Self::qsy_button(&f, &p, "QSY");
+            let sz = b.size(ui);
+            let wrap = wraps.get(i).copied().unwrap_or(false);
+            // the button leads the line; on a narrow card the label drops under it
+            let r = Rect::from_min_size(Pos2::new(lx, ry + ((rowh - sz.y) / 2.0).floor()), sz);
+            let (lab_x, lab_y) = if wrap {
+                top += rowh + 2.0;
+                (lx, ry + rowh + 2.0)
+            } else {
+                (lx + sz.x + 8.0, ry)
+            };
+            let w = ui::text(ui, ui.painter(), Pos2::new(lab_x + 1.0, lab_y + 1.0), &label, &f.ui_bold, p.new);
+            let label_r = Rect::from_min_size(Pos2::new(lab_x, lab_y), Vec2::new(w + 2.0, rowh));
             let label_resp = ui.interact(label_r, Id::unique(("notice", i)), Sense::hover());
             if label_resp.hovered() {
                 let now = Utc::now();
@@ -2500,16 +2511,6 @@ impl App {
                     self.tips.tip(&label_resp, &lines.join("\n"), 300, TipAt::Below(label_r));
                 }
             }
-            let qsy_text = format!("QSY to {band} {mode}");
-            let b = Self::qsy_button(&f, &p, &qsy_text);
-            let sz = b.size(ui);
-            let wrap = wraps.get(i).copied().unwrap_or(false);
-            let r = if wrap {
-                top += rowh + 2.0; // the button goes on a row of its own under the label
-                Rect::from_min_size(Pos2::new(lx, ry + rowh + 2.0 + ((rowh - sz.y) / 2.0).floor()), sz)
-            } else {
-                Rect::from_min_size(Pos2::new(lx + w + 2.0 + 10.0, ry + ((rowh - sz.y) / 2.0).floor()), sz)
-            };
             let resp = b.show(ui, Id::unique(("qsy", i)), r, true);
             self.tips.tip(&resp, &format!("Switch WSJT-X to {band} {mode}\n(not while a QSO or Tx is active)"), 300, TipAt::Below(r));
             if resp.clicked() {
