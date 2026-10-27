@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! N3FJP ACLog TCP API client (ACLog: Settings > Application Program Interface).
 
 use std::io::{Read, Write};

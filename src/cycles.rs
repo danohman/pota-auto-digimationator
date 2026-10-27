@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! T/R period lengths for the modes WSJT-X supports (WSJT-X 2.7 user guide).
 //!
 //! Fixed-period modes come from a table. FST4, FST4W and Q65 let the operator pick

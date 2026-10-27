@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Play the QSO-logged sound (assets/ding.mp3) through Windows' MCI.
 
 use std::path::{Path, PathBuf};

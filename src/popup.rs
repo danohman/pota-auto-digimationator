@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! A themed popup menu (right-click on a spot, the band and mode drop-downs).
 
 use eframe::egui::{self, CursorIcon, Id, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Vec2};

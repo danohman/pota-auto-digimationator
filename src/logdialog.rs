@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Find WSJT-X's (or WSJT-X Improved's) Log QSO window and press its default (OK) button.
 //!
 //! WSJT-X keeps the window around hidden ("WSJT-X   v2.7.0-rc7    - Log QSO") and shows

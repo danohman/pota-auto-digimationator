@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! App-wide text selection: drag across any text in the main window to highlight it,
 //! Ctrl+C copies it (handy for debugging). Every string `ui::text` / `ui::text_on`
 //! draws is recorded as a run (its position, characters and clip) while the mouse button

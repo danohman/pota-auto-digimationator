@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The "Are you still there?" timer: proof that an operator is at the station while an
 //! Auto mode is on. Pure logic; the app shows the dialogs.
 

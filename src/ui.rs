@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Drawing primitives that reproduce classic Win32 controls: text placed by
 //! GDI metrics, rounded boxes and pills (`Rnd`), tooltips, and slim scrollbars.
 

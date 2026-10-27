@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Light and dark palettes, fonts (the same Windows fonts Tk picks) and the Win32
 //! window touches (dark title bar, rounded corners, monitor work areas).
 

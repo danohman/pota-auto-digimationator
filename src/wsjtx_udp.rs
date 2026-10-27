@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! WSJT-X UDP protocol (NetworkMessage.hpp) codec and multicast listener.
 
 use std::collections::HashMap;

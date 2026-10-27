@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Start WSJT-X calling CQ, and press its band and mode buttons, by driving its own
 //! controls through Windows UI Automation (PowerShell, no focus or mouse).
 //!

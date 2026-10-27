@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The Activity log: a word-wrapped monospace list of lines, each with a timestamp, any
 //! one-shot buttons (Call now, Skip, Answer, Halt Tx) and an optional NEW chip.
 

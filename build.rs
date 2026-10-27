@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 // Puts assets/icon.ico into the exe so Explorer and the taskbar show the app icon.
 fn main() {
     println!("cargo:rerun-if-changed=assets/icon.ico");

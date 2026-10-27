@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Signing in to pota.app (AWS Cognito, SRP) and fetching the operator's hunt counts.
 //!
 //! pota.app's Cognito client only allows USER_SRP_AUTH, so the password never leaves

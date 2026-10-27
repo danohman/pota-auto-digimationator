@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The modal windows: the enable confirmation and the "Are you still there?" pair.
 //! Each is a real window (an egui viewport) with a title bar, centred over the app.
 

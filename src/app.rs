@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The main window: owns the hunter, the worker threads, the
 //! settings and state files, and draws everything.
 
@@ -710,7 +712,7 @@ impl App {
             }
         }
         if self.last_wsjtx.is_some() && addr.is_some() {
-            return ("WSJT-X went quiet (no packets in 35 s)".into(), false);
+            return ("WSJT-X went quiet".into(), false);
         }
         (format!("No packets yet on {}:{}", l.group, l.port), false)
     }
@@ -1601,7 +1603,7 @@ impl App {
         } else if connected {
             ("WSJT-X connected".to_string(), p.ok)
         } else {
-            ("WSJT-X not connected (no packets in 35 s)".to_string(), p.bad)
+            ("WSJT-X not connected".to_string(), p.bad)
         };
         let conn = self.chip(&conn_text, &f.ui).dot(Some(conn_dot));
         let station_text = st.as_ref().map(|s| format!("{}   {:.3} MHz", s.de_call, s.dial_freq as f64 / 1e6)).unwrap_or_default();

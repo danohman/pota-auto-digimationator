@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The Settings popover under the gear button: tabs of switches, steppers and segmented
 //! choices, plus the WSJT-X setup, ACLog and pota.app account sub-pages.
 

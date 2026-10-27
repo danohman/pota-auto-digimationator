@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! settings.json: keys and defaults, unknown keys are kept.
 
 use std::collections::BTreeMap;

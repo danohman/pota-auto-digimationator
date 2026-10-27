@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! pota.app spot poller. Fetches at most once a minute and keeps a local copy.
 
 use std::collections::HashMap;

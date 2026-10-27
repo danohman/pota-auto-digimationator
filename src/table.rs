@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The heading + rows list:
 //! per-cell hyperlinks, check/cross icons, chips, "(n)" suffixes, row backgrounds,
 //! hover hints and a right-click hook.
