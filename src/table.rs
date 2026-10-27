@@ -305,7 +305,7 @@ impl Table {
                 None
             };
             if let Some(bg) = bg {
-                clip.rect_filled(row_rect, 0.0, bg);
+                clip.rect_filled(row_rect, 3.0, bg);
             }
             // what the text really sits on, for ClearType
             let text_bg = bg.unwrap_or(p.surface);
@@ -341,7 +341,6 @@ impl Table {
                             let r = Rnd::new(&l.text, &f.table_heading).pill().pad(7.0, 0.0).colors(fill, fg);
                             let sz = r.size(ui);
                             let rr = Rect::from_min_size(Pos2::new(x, win_top), sz);
-                            holder(&clip, rr, Self::nudge(f), row_bg);
                             r.paint(ui, &clip, rr, false);
                             if let Some(tip) = &l.tip {
                                 let resp = ui.interact(rr.intersect(body), Id::unique((self.id, "lead", ri, i)), Sense::hover());
@@ -365,7 +364,6 @@ impl Table {
                     let r = Rnd::new(&chip.text, &f.table_heading).pill().pad(8.0, 0.0).colors(chip.fill, chip.fg);
                     let sz = r.size(ui);
                     let rr = Rect::from_min_size(Pos2::new(x, win_top), sz);
-                    holder(&clip, rr, Self::nudge(f), row_bg);
                     r.paint(ui, &clip, rr, false);
                     if let Some(tip) = &chip.tip {
                         let resp = ui.interact(rr.intersect(body), Id::unique((self.id, "chip", ri, i)), Sense::hover());
@@ -415,12 +413,6 @@ impl Table {
             ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
         }
     }
-}
-
-/// The frame a chip sits in keeps the colour it was made with, so on a tinted row (a
-/// station just heard, the one being called) it shows as a box around the chip, as in Tk.
-fn holder(painter: &egui::Painter, chip: Rect, nudge: f32, outer: Color32) {
-    painter.rect_filled(Rect::from_min_max(Pos2::new(chip.left(), chip.top() - nudge), chip.max), 0.0, outer);
 }
 
 /// Spots older than STALE_MINUTES: the Ago text takes a faint red (Tk has no alpha, so
