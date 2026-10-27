@@ -955,7 +955,16 @@ impl App {
                 };
                 self.log(&t, Tag::Error);
             }
-            Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/DNR off") || t.starts_with("PWR ") => self.static_rig = t,
+            Event::Aclog(t, Tag::Info) if t.starts_with("CAT:") => {
+                let item = &t[4..];
+                if !self.static_rig.split('/').any(|p| p == item) {
+                    if !self.static_rig.is_empty() {
+                        self.static_rig.push('/');
+                    }
+                    self.static_rig.push_str(item);
+                }
+            }
+            Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/DNR off") || t.starts_with("PWR ") => {}
             Event::Aclog(t, tag) => self.log(&t, tag),
             Event::Retune(what, value, result) => {
                 if result != "ok" {
@@ -2087,7 +2096,7 @@ impl App {
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
             let band = self.h.band().unwrap_or("?");
-            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", cat_label(&self.static_rig)) };
+            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", self.static_rig) };
             let text = format!("WSJT-X: {} on {} {} ({:.3} MHz){cat}", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
             info.push(StaticLine::new(self.stamp("wsjtx", &text), text));
         }
@@ -3299,14 +3308,3 @@ impl eframe::App for App {
     }
 }
 
-/// "ATT/NB/DNR off, PWR 50 W" -> "ATT/NB/DNR/PWR" (what the rig was set for, for the Current Info line).
-fn cat_label(done: &str) -> String {
-    let mut parts = Vec::new();
-    if done.contains("ATT/NB/DNR") {
-        parts.push("ATT/NB/DNR");
-    }
-    if done.contains("PWR") {
-        parts.push("PWR");
-    }
-    parts.join("/")
-}

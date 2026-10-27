@@ -182,6 +182,13 @@ impl AclogClient {
                     std::thread::sleep(Duration::from_millis(300)); // CAT wants a gap between commands
                 }
                 self.send(&format!("<CMD><SENDRIGCOMMAND><VALUE>{cmd}</VALUE></CMD>"), false)?;
+                let item = match &cmd[..2] {
+                    "RA" => "ATT",
+                    "NB" => "NB",
+                    "NR" => "DNR",
+                    _ => "PWR",
+                };
+                (self.post)(Event::Aclog(format!("CAT:{item}"), Tag::Info)); // shown in Current Info once sent
             }
             Ok(())
         })();
