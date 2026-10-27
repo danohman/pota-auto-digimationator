@@ -8,6 +8,12 @@ It was developed and tested using [WSJT-X Improved](https://ws-suite.sourceforge
 
 **You stay the control operator.** Fully automated QSOs are prohibited. The program only helps you call stations: it asks you to confirm that you're at your station every time you turn an Auto mode on, and it checks that you're still there every 10 minutes (see [Safety](#safety)).
 
+**FULLY AUTOMATED QSOs ARE PROHIBITED BY PARKS ON THE AIR**
+
+Using the Auto-* modes in this application is intended to assist you, not replace you.
+
+**As the control operator, you are required to be present and in control of your station whenever it is transmitting. Stay at the radio, watch what it does, and turn it off if anything looks wrong.**
+
 ## Contents
 
 - [Getting started](#getting-started)
