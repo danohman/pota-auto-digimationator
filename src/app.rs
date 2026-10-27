@@ -130,6 +130,68 @@ impl HunterIo for AppIo {
 #[derive(PartialEq, Clone)]
 struct SpotsKey(Option<u64>, Option<&'static str>, String, usize, usize, Option<String>, bool, Option<u64>, i64);
 
+/// The sections that can be popped out into their own windows.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+enum Card {
+    Info,
+    Log,
+    Notices,
+    Spots,
+    Done,
+    Worked,
+}
+
+impl Card {
+    const ALL: [Card; 6] = [Card::Info, Card::Log, Card::Notices, Card::Spots, Card::Done, Card::Worked];
+
+    /// the name in settings.json
+    fn key(self) -> &'static str {
+        match self {
+            Card::Info => "info",
+            Card::Log => "activity",
+            Card::Notices => "new_parks",
+            Card::Spots => "spots",
+            Card::Done => "worked_skipped",
+            Card::Worked => "worked_today",
+        }
+    }
+
+    fn from_key(k: &str) -> Option<Card> {
+        Card::ALL.into_iter().find(|c| c.key() == k)
+    }
+
+    /// window title part
+    fn title(self) -> &'static str {
+        match self {
+            Card::Info => "Current Info",
+            Card::Log => "Activity",
+            Card::Notices => "POTA Spots (New to me)",
+            Card::Spots => "Current POTA Spots (Not worked today)",
+            Card::Done => "Current POTA Spots (Worked/Skipped today)",
+            Card::Worked => "Worked today",
+        }
+    }
+}
+
+/// A section's own window: where it opens and where it is now (points on screen).
+struct Pop {
+    popped: bool,
+    init: Rect,
+    cur: Rect,
+    /// the geometry has been checked against the monitors
+    placed: bool,
+    /// hover hints of this window (the main window has its own)
+    tips: Tips,
+    hwnd: isize,
+    titled: Option<bool>,
+}
+
+impl Pop {
+    fn new(popped: bool, r: Rect) -> Self {
+        Pop { popped, init: r, cur: r, placed: false, tips: Tips::default(), hwnd: 0, titled: None }
+    }
+}
+
 /// Pane dividers, in pixels from the panes' origin.
 struct Panes {
     /// width of the left (log) pane
@@ -257,6 +319,15 @@ pub struct App {
     timers: Vec<(f64, Timer)>,
     pub panel: Panel,
     popup: Option<PopupMenu>,
+    /// the section window the open popup belongs to (None: the main window)
+    popup_in: Option<Card>,
+    pops: std::collections::BTreeMap<Card, Pop>,
+    /// where each section was last drawn in the main window (to size its pop-out window)
+    card_rects: HashMap<Card, Rect>,
+    /// pop-out (true) or dock-back (false) requests from the header buttons
+    pop_req: Vec<(Card, bool)>,
+    /// the section whose own window is being drawn
+    in_pop: Option<Card>,
     dialog: Option<Dialog>,
     tips: Tips,
     panes: Panes,
@@ -391,6 +462,14 @@ impl App {
             Col::new("logged", "Log", "Log").tip("Logged successful or not"),
             Col::new("park", "Park", PARK_SAMPLE).tip("Logged park reference and name"),
         ];
+        let pops = s
+            .popouts
+            .iter()
+            .filter_map(|(k, g)| {
+                let r = Rect::from_min_size(Pos2::new(g.x as f32, g.y as f32), Vec2::new(g.w as f32, g.h as f32));
+                Some((Card::from_key(k)?, Pop::new(g.popped, r)))
+            })
+            .collect();
         let mut app = App {
             dir: dir.clone(),
             s,
@@ -440,6 +519,11 @@ impl App {
             timers: vec![],
             panel: Panel::default(),
             popup: None,
+            popup_in: None,
+            pops,
+            card_rects: HashMap::new(),
+            pop_req: vec![],
+            in_pop: None,
             dialog: None,
             tips: Tips::default(),
             panes: Panes { left: 0.0, a: 0.0, b: 0.0, placed: false, last: Vec2::ZERO, drag: None, nh: 0.0 },
@@ -933,6 +1017,7 @@ impl App {
         let now = self.now();
         if let Some(why) = self.h.retune_blocker() {
             self.popup = Some(PopupMenu::new(vec![Item::Heading(format!("Can't change {which}: {why}"))], anchor, now));
+            self.popup_in = None;
             return;
         }
         let (names, current): (Vec<String>, String) = if which == "band" {
@@ -949,6 +1034,7 @@ impl App {
             })
             .collect();
         self.popup = Some(PopupMenu::new(items, anchor, now));
+        self.popup_in = None;
     }
 
     pub fn retune(&mut self, band: Option<String>, mode: Option<String>) {
@@ -1514,6 +1600,7 @@ impl App {
 
     fn persist_layout(&mut self, ctx: &egui::Context) {
         self.save_layout(ctx);
+        self.save_popouts();
         if let Some(g) = self.geometry_string(ctx) {
             self.s.window = Some(g);
         }
@@ -1877,9 +1964,10 @@ impl App {
             _ => "Activity".to_string(),
         };
         let title_right = self.card_title(ui, hx, hy, head_content, &title);
+        let pop_left = self.pop_button(ui, Card::Log, inner, hy, head_content);
         let clear = Rnd::new("Clear", &f.small_bold).pill().pad(10.0, 2.0).colors(p.blue, p.blue_text).hover(p.blue_hover);
         let sz = clear.size(ui);
-        let r = Rect::from_min_size(Pos2::new(inner.right() - PAD - sz.x, hy + ((head_content - sz.y) / 2.0).floor()), sz);
+        let r = Rect::from_min_size(Pos2::new(pop_left - sz.x, hy + ((head_content - sz.y) / 2.0).floor()), sz);
         let resp = clear.show(ui, Id::unique("log-clear"), r, true);
         self.tips.tip(&resp, "Clear the activity log", 500, TipAt::Below(r));
         if resp.clicked() {
@@ -1985,6 +2073,7 @@ impl App {
         let hy0 = self.card_head(ui, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         self.card_title(ui, hx, hy, hc, "Current Info");
+        self.pop_button(ui, Card::Info, inner, hy, hc);
         let info = self.build_info(ui, rect.width());
         let (click, _) = self.static_selection(ui, &info, inner, hy + hc + 6.0);
         match click {
@@ -2208,6 +2297,7 @@ impl App {
         let x = self.card_title(ui, hx, hy, hc, "POTA Spots (New to me) [on other band/mode]");
         let total = self.notices.iter().map(|n| n.2).sum::<usize>().to_string();
         self.pill(ui, x + 8.0, hy, hc, &total, "new-count");
+        self.pop_button(ui, Card::Notices, inner, hy, hc);
         let (wraps, _) = self.notices_layout(ui, rect.width());
         let rowh = f.ui_bold.m.linespace + 2.0;
         let lx = inner.left() + PAD + 2.0;
@@ -2265,6 +2355,7 @@ impl App {
         let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.spots_count.clone();
         self.pill(ui, x + 8.0, hy, hc, &count, "spots-count");
+        self.pop_button(ui, Card::Spots, inner, hy, hc);
         let top = hy + hc + 6.0;
         let table_rect = Rect::from_min_max(Pos2::new(inner.left(), top), inner.max);
         let colors = self.row_colors();
@@ -2375,6 +2466,7 @@ impl App {
         let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.done_count.clone();
         self.pill(ui, x + 8.0, hy, hc, &count, "done-count");
+        self.pop_button(ui, Card::Done, inner, hy, hc);
         let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 6.0), inner.max);
         let colors = self.row_colors();
         let mut events = vec![];
@@ -2406,7 +2498,8 @@ impl App {
             ui::text(ui, ui.painter(), Pos2::new(x + 6.0 + 2.0, hy + ((hc - lh) / 2.0).floor() + 2.0), &day_left, &f.small, p.muted);
             left_end = x + 8.0 + day_w;
         }
-        let (_, changed) = self.search_box(ui, inner.right() - PAD, left_end + 10.0, hy, hc, "Search worked today", 1);
+        let pop_left = self.pop_button(ui, Card::Worked, inner, hy, hc);
+        let (_, changed) = self.search_box(ui, pop_left, left_end + 10.0, hy, hc, "Search worked today", 1);
         if changed {
             self.render_worked();
         }
@@ -2444,6 +2537,7 @@ impl App {
                 },
             ];
             self.popup = Some(PopupMenu::new(items, pos, self.now()));
+            self.popup_in = self.in_pop;
         }
     }
 
@@ -2490,9 +2584,16 @@ impl App {
             self.panes.b = b.max(self.panes.a + 10.0);
             self.panes.last = total;
         }
+        // popped-out sections leave the main window; a column with nothing left goes away
+        let popped = |c: Card| self.is_popped(c);
+        let (info_out, log_out, notices_out) = (popped(Card::Info), popped(Card::Log), popped(Card::Notices));
+        let vis = [!popped(Card::Spots), !popped(Card::Done), !popped(Card::Worked)];
+        let left_gone = info_out && log_out;
+        let right_gone = !vis.iter().any(|v| *v) && (notices_out || self.notices.is_empty());
+        let left_w = if left_gone { 0.0 } else if right_gone { total.x } else { self.panes.left.round() };
         // the new-parks card takes its height from the Spots card, so the others keep theirs
-        let rw0 = total.x - self.panes.left.round() - 10.0;
-        let nh = if rw0 > 150.0 && !self.notices.is_empty() { (self.notices_layout(ui, rw0).1).min(total.y * 0.4) + 10.0 } else { 0.0 };
+        let rw0 = total.x - left_w - 10.0;
+        let nh = if rw0 > 150.0 && !self.notices.is_empty() && !notices_out { (self.notices_layout(ui, rw0).1).min(total.y * 0.4) + 10.0 } else { 0.0 };
         if (nh - self.panes.nh).abs() > 0.5 {
             let d = nh - self.panes.nh;
             self.panes.a = (self.panes.a - d).max(0.0);
@@ -2500,10 +2601,11 @@ impl App {
             self.panes.nh = nh;
         }
         let pz = &self.panes;
-        let (left, a, b) = (pz.left.round(), pz.a.round(), pz.b.round());
+        let (a, b) = (pz.a.round(), pz.b.round());
+        let left = left_w;
         let col = area.top() + nh;
         // the Current Info card sits above the Activity log and takes its height from it
-        let info_h = if left > 120.0 {
+        let info_h = if left > 120.0 && !info_out {
             let info = self.build_info(ui, left);
             self.info_height(ui, &info).min(total.y * 0.55)
         } else {
@@ -2511,19 +2613,47 @@ impl App {
         };
         let info_rect = Rect::from_min_size(area.min, Vec2::new(left, info_h));
         let log_top = if info_h > 0.0 { area.top() + info_h + 10.0 } else { area.top() };
-        let log_rect = Rect::from_min_max(Pos2::new(area.left(), log_top), Pos2::new(area.left() + left, area.bottom()));
-        let rx = area.left() + left + 10.0;
-        let rw = total.x - left - 10.0;
-        let notices_rect = Rect::from_min_size(Pos2::new(rx, area.top()), Vec2::new(rw, (nh - 10.0).max(0.0)));
-        let spots_rect = Rect::from_min_size(Pos2::new(rx, col), Vec2::new(rw, a));
-        let done_rect = Rect::from_min_max(Pos2::new(rx, col + a + 10.0), Pos2::new(rx + rw, col + b));
-        let worked_rect = Rect::from_min_max(Pos2::new(rx, col + b + 10.0), Pos2::new(rx + rw, area.bottom()));
+        let log_rect = if log_out {
+            Rect::NOTHING
+        } else {
+            Rect::from_min_max(Pos2::new(area.left(), log_top), Pos2::new(area.left() + left, area.bottom()))
+        };
+        let rx = if left_gone { area.left() } else { area.left() + left + 10.0 };
+        let rw = if right_gone { 0.0 } else if left_gone { total.x } else { total.x - left - 10.0 };
+        let notices_rect = if notices_out { Rect::NOTHING } else { Rect::from_min_size(Pos2::new(rx, area.top()), Vec2::new(rw, (nh - 10.0).max(0.0))) };
+        // the three lists share the rest of the column: the dividers' sizes when all are
+        // there, else their sizes scaled up to fill it
+        let (spots_rect, done_rect, worked_rect);
+        if vis.iter().all(|v| *v) {
+            spots_rect = Rect::from_min_size(Pos2::new(rx, col), Vec2::new(rw, a));
+            done_rect = Rect::from_min_max(Pos2::new(rx, col + a + 10.0), Pos2::new(rx + rw, col + b));
+            worked_rect = Rect::from_min_max(Pos2::new(rx, col + b + 10.0), Pos2::new(rx + rw, area.bottom()));
+        } else {
+            let column_h = area.bottom() - col;
+            let weights = [a.max(20.0), (b - a - 10.0).max(20.0), (column_h - b - 10.0).max(20.0)];
+            let n = vis.iter().filter(|v| **v).count();
+            let sum: f32 = (0..3).filter(|i| vis[*i]).map(|i| weights[i]).sum();
+            let avail = (column_h - 10.0 * n.saturating_sub(1) as f32).max(0.0);
+            let mut y = col;
+            let mut rects = [Rect::NOTHING; 3];
+            for i in 0..3 {
+                if vis[i] {
+                    let h = (avail * weights[i] / sum).floor();
+                    rects[i] = Rect::from_min_size(Pos2::new(rx, y), Vec2::new(rw, h));
+                    y += h + 10.0;
+                }
+            }
+            (spots_rect, done_rect, worked_rect) = (rects[0], rects[1], rects[2]);
+        }
         // dividers
-        let sashes = [
-            (0u8, Rect::from_min_size(Pos2::new(area.left() + left, area.top()), Vec2::new(10.0, total.y)), CursorIcon::ResizeHorizontal),
-            (1u8, Rect::from_min_size(Pos2::new(rx, col + a), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical),
-            (2u8, Rect::from_min_size(Pos2::new(rx, col + b), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical),
-        ];
+        let mut sashes = vec![];
+        if !left_gone && !right_gone {
+            sashes.push((0u8, Rect::from_min_size(Pos2::new(area.left() + left, area.top()), Vec2::new(10.0, total.y)), CursorIcon::ResizeHorizontal));
+        }
+        if vis.iter().all(|v| *v) {
+            sashes.push((1u8, Rect::from_min_size(Pos2::new(rx, col + a), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical));
+            sashes.push((2u8, Rect::from_min_size(Pos2::new(rx, col + b), Vec2::new(rw, 10.0)), CursorIcon::ResizeVertical));
+        }
         for (i, r, cursor) in sashes {
             let resp = ui.interact(r, Id::unique(("sash", i)), Sense::drag());
             if resp.hovered() || resp.dragged() {
@@ -2543,31 +2673,216 @@ impl App {
         }
         // each card draws inside its own rectangle (nothing spills out in a narrow window)
         let outer_clip = ui.clip_rect();
-        if info_rect.height() > 2.0 && info_rect.width() > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(info_rect));
-            self.draw_info_card(ui, info_rect);
-        }
-        if log_rect.width() > 2.0 && log_rect.height() > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(log_rect));
-            self.draw_log_card(ui, log_rect);
-        }
-        if notices_rect.height() > 2.0 && rw > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(notices_rect));
-            self.draw_notices_card(ui, notices_rect);
-        }
-        if spots_rect.height() > 2.0 && rw > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(spots_rect));
-            self.draw_spots_card(ui, spots_rect);
-        }
-        if done_rect.height() > 2.0 && rw > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(done_rect));
-            self.draw_done_card(ui, done_rect);
-        }
-        if worked_rect.height() > 2.0 && rw > 2.0 {
-            ui.set_clip_rect(outer_clip.intersect(worked_rect));
-            self.draw_worked_card(ui, worked_rect);
+        let cards = [
+            (Card::Info, info_rect, left > 120.0 && info_h > 2.0),
+            (Card::Log, log_rect, log_rect.width() > 2.0 && log_rect.height() > 2.0),
+            (Card::Notices, notices_rect, notices_rect.height() > 2.0 && rw > 2.0),
+            (Card::Spots, spots_rect, spots_rect.height() > 2.0 && rw > 2.0),
+            (Card::Done, done_rect, done_rect.height() > 2.0 && rw > 2.0),
+            (Card::Worked, worked_rect, worked_rect.height() > 2.0 && rw > 2.0),
+        ];
+        for (card, rect, show) in cards {
+            if show {
+                self.card_rects.insert(card, rect);
+                ui.set_clip_rect(outer_clip.intersect(rect));
+                self.draw_card(ui, card, rect);
+            }
         }
         ui.set_clip_rect(outer_clip);
+    }
+
+    // --- sections in their own windows ---------------------------------------------------
+
+    fn is_popped(&self, card: Card) -> bool {
+        self.pops.get(&card).is_some_and(|p| p.popped)
+    }
+
+    fn draw_card(&mut self, ui: &mut Ui, card: Card, rect: Rect) {
+        match card {
+            Card::Info => self.draw_info_card(ui, rect),
+            Card::Log => self.draw_log_card(ui, rect),
+            Card::Notices => self.draw_notices_card(ui, rect),
+            Card::Spots => self.draw_spots_card(ui, rect),
+            Card::Done => self.draw_done_card(ui, rect),
+            Card::Worked => self.draw_worked_card(ui, rect),
+        }
+    }
+
+    /// The pop-out / dock-back button at the right end of a card's header row; returns
+    /// the x of its left edge, so the header's other right-aligned items stop short of it.
+    fn pop_button(&mut self, ui: &mut Ui, card: Card, inner: Rect, hy: f32, hc: f32) -> f32 {
+        let (p, f) = (self.p.clone(), self.f.clone());
+        let in_window = self.in_pop == Some(card);
+        let (icon, text, tip) = if in_window {
+            (theme::ICON_DOCK, "Dock", "Put this section back in the main window")
+        } else {
+            (theme::ICON_POP, "Pop out", "Move this section into its own window")
+        };
+        let (txt, font) = if f.has_icons { (icon, &f.icon_12) } else { (text, &f.small_bold) };
+        let b = Rnd::new(txt, font).pill().pad(if f.has_icons { 8.0 } else { 10.0 }, 2.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover).icon();
+        let sz = b.size(ui);
+        let r = Rect::from_min_size(Pos2::new(inner.right() - PAD - sz.x, hy + ((hc - sz.y) / 2.0).floor()), sz);
+        let resp = b.show(ui, Id::unique(("pop-btn", card.key())), r, true);
+        self.tips.tip(&resp, tip, 500, TipAt::Below(r));
+        if resp.clicked() {
+            self.pop_req.push((card, !in_window));
+        }
+        r.left() - 10.0
+    }
+
+    /// Carry out the pop-out / dock-back requests of this frame.
+    fn apply_pop_requests(&mut self, ctx: &egui::Context) {
+        for (card, out) in std::mem::take(&mut self.pop_req) {
+            if out {
+                let main = ctx.input(|i| i.viewport().inner_rect).unwrap_or(Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(1000.0, 700.0)));
+                let r = self.card_rects.get(&card).copied().unwrap_or(Rect::from_min_size(Pos2::new(40.0, 40.0), Vec2::new(500.0, 300.0)));
+                let size = Vec2::new(r.width().max(260.0), r.height().max(160.0));
+                let fresh = Rect::from_min_size(main.min + r.min.to_vec2() + Vec2::splat(30.0), size);
+                // a window that was popped out before reopens where it was
+                let pop = self.pops.entry(card).or_insert_with(|| Pop::new(true, fresh));
+                pop.popped = true;
+                pop.placed = false;
+                pop.titled = None;
+                pop.hwnd = 0;
+            } else if let Some(pop) = self.pops.get_mut(&card) {
+                pop.popped = false;
+                pop.init = pop.cur;
+            }
+            self.layout_due = Some(self.now() + 0.5);
+        }
+    }
+
+    /// Every popped-out section in its own window.
+    fn draw_popouts(&mut self, ctx: &egui::Context) {
+        use egui::{ViewportBuilder, ViewportId};
+        self.apply_pop_requests(ctx);
+        let dark = self.theme_name == "dark";
+        let cards: Vec<Card> = self.pops.iter().filter(|(_, p)| p.popped).map(|(c, _)| *c).collect();
+        for card in cards {
+            if !self.pops[&card].placed {
+                self.place_pop(card, ctx);
+            }
+            let title = format!("{TITLE} - {}", card.title());
+            let init = self.pops[&card].init;
+            let builder = ViewportBuilder::default()
+                .with_title(title.clone())
+                .with_inner_size(init.size())
+                .with_position(init.min)
+                .with_min_inner_size(Vec2::new(220.0, 120.0));
+            let id = ViewportId::from_hash_of(("pop", card.key()));
+            // this window's own hover hints while it is drawn
+            let mut tips = std::mem::take(&mut self.pops.get_mut(&card).unwrap().tips);
+            std::mem::swap(&mut self.tips, &mut tips);
+            self.in_pop = Some(card);
+            let (mut dock, mut active, mut cur) = (false, false, None);
+            let mut typed: Vec<char> = Vec::new();
+            ctx.show_viewport_immediate(id, builder, |ui: &mut Ui, _class| {
+                let (p, f) = (self.p.clone(), self.f.clone());
+                ui.input(|i| {
+                    for e in &i.events {
+                        match e {
+                            egui::Event::Text(t) => typed.extend(t.chars()),
+                            egui::Event::PointerButton { pressed: true, .. } | egui::Event::MouseWheel { .. } => active = true,
+                            egui::Event::Key { pressed: true, .. } => active = true,
+                            _ => {}
+                        }
+                    }
+                });
+                let full = ui.ctx().content_rect();
+                ui.painter().rect_filled(full, 0.0, p.bg);
+                let rect = full.shrink(PAD / 2.0);
+                let outer = ui.clip_rect();
+                ui.set_clip_rect(outer.intersect(rect));
+                self.draw_card(ui, card, rect);
+                ui.set_clip_rect(outer);
+                if self.popup_in == Some(card) {
+                    if let Some(menu) = self.popup.take() {
+                        match menu.show(ui.ctx(), ui, &p, &f) {
+                            None => self.popup = Some(menu),
+                            Some(Some(cmd)) => {
+                                self.popup_in = None;
+                                self.menu_cmd(cmd);
+                            }
+                            Some(None) => self.popup_in = None,
+                        }
+                    } else {
+                        self.popup_in = None;
+                    }
+                }
+                let tf = f.tip.clone();
+                self.tips.show(ui.ctx(), ui, &p, &tf);
+                if ui.input(|i| i.viewport().close_requested()) {
+                    dock = true;
+                }
+                let (o, i) = ui.ctx().input(|i| (i.viewport().outer_rect, i.viewport().inner_rect));
+                if let (Some(o), Some(i)) = (o, i) {
+                    cur = Some(Rect::from_min_size(o.min, i.size()));
+                }
+            });
+            self.in_pop = None;
+            std::mem::swap(&mut self.tips, &mut tips);
+            let now = self.now();
+            let mut moved = false;
+            if let Some(pop) = self.pops.get_mut(&card) {
+                pop.tips = tips;
+                if let Some(c) = cur {
+                    if c != pop.cur {
+                        pop.cur = c;
+                        moved = true;
+                    }
+                }
+                if dock {
+                    pop.popped = false;
+                    pop.init = pop.cur;
+                    moved = true;
+                }
+                if pop.titled != Some(dark) {
+                    if pop.hwnd == 0 {
+                        pop.hwnd = theme::find_own_window(&title);
+                    }
+                    if pop.hwnd != 0 {
+                        theme::set_title_bar(pop.hwnd, dark);
+                        refresh_frame(pop.hwnd);
+                        pop.titled = Some(dark);
+                    }
+                }
+            }
+            if moved {
+                self.layout_due = Some(now + 0.5);
+            }
+            if active {
+                self.activity();
+            }
+            for c in typed {
+                self.bypass_keys(c);
+            }
+        }
+    }
+
+    /// Make sure a popped-out window opens on a monitor and isn't tiny.
+    fn place_pop(&mut self, card: Card, ctx: &egui::Context) {
+        let ppp = self.ppp.max(0.5);
+        let main = ctx.input(|i| i.viewport().inner_rect).unwrap_or(Rect::from_min_size(Pos2::new(100.0, 100.0), Vec2::new(1000.0, 700.0)));
+        let (vl, vt, vw, vh) = theme::virtual_desktop();
+        let Some(pop) = self.pops.get_mut(&card) else { return };
+        let r = pop.init;
+        let (px, py) = (r.left() * ppp + 40.0, r.top() * ppp + 10.0);
+        let on_screen = px >= vl as f32 && px < (vl + vw) as f32 && py >= vt as f32 && py < (vt + vh) as f32;
+        let size = Vec2::new(r.width().max(220.0), r.height().max(120.0));
+        pop.init = if on_screen { Rect::from_min_size(r.min, size) } else { Rect::from_min_size(main.min + Vec2::splat(60.0), size) };
+        pop.cur = pop.init;
+        pop.placed = true;
+    }
+
+    fn save_popouts(&mut self) {
+        self.s.popouts = self
+            .pops
+            .iter()
+            .map(|(c, p)| {
+                let r = if p.popped { p.cur } else { p.init };
+                (c.key().to_string(), settings::PopGeom { popped: p.popped, x: r.left() as f64, y: r.top() as f64, w: r.width() as f64, h: r.height() as f64 })
+            })
+            .collect();
     }
 
     fn title_bar(&mut self) {
@@ -2723,7 +3038,7 @@ impl eframe::App for App {
         } else {
             self.panel = panel;
         }
-        if let Some(menu) = self.popup.take() {
+        if let Some(menu) = if self.popup_in.is_none() { self.popup.take() } else { None } {
             match menu.show(&ctx, ui, &self.p, &self.f) {
                 None => self.popup = Some(menu),
                 Some(Some(cmd)) => self.menu_cmd(cmd),
@@ -2768,6 +3083,7 @@ impl eframe::App for App {
             let at = Rect::from_min_size(Pos2::new(200.0, 200.0), Vec2::new(300.0, 20.0));
             self.tips.tip_area(Id::new("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));
         }
+        self.draw_popouts(&ctx);
         let tips_font = self.f.tip.clone();
         let p = self.p.clone();
         self.tips.show(&ctx, ui, &p, &tips_font);

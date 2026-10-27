@@ -14,6 +14,16 @@ pub struct Layout {
     pub split: Option<Vec<f64>>,
 }
 
+/// Where a section sits when it is popped out into its own window (points on screen).
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct PopGeom {
+    pub popped: bool,
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -51,6 +61,9 @@ pub struct Settings {
     pub theme: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub layout: Option<Layout>,
+    /// popped-out sections by name (see app::Card)
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub popouts: BTreeMap<String, PopGeom>,
     /// Tk geometry, "WxH+X+Y"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
@@ -87,6 +100,7 @@ impl Default for Settings {
             pota_password: String::new(),
             theme: "system".into(),
             layout: None,
+            popouts: BTreeMap::new(),
             window: None,
             extra: Map::new(),
         }
