@@ -275,7 +275,7 @@ pub fn find_own_window(title: &str) -> isize {
         pid: u32,
         found: isize,
     }
-    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> i32 {
+    unsafe extern "system" fn cb(hwnd: HWND, lp: LPARAM) -> i32 { unsafe {
         let f = &mut *(lp as *mut Find);
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, &mut pid);
@@ -284,7 +284,7 @@ pub fn find_own_window(title: &str) -> isize {
             return 0;
         }
         1
-    }
+    }}
     let mut f = Find { title: title.to_string(), pid: unsafe { GetCurrentProcessId() }, found: 0 };
     unsafe { EnumWindows(Some(cb), &mut f as *mut Find as LPARAM) };
     f.found

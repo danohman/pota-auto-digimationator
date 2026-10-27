@@ -1868,7 +1868,7 @@ impl App {
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
             let band = self.h.band().unwrap_or("?");
-            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", self.static_rig) };
+            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", self.static_rig.trim_end_matches(" off")) };
             let text = format!("WSJT-X: {} on {} {} ({:.3} MHz){cat}", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
             info.push(StaticLine::new(self.stamp("wsjtx", &text), text));
         }

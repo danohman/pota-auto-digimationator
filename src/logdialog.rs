@@ -50,7 +50,7 @@ pub fn window_title(hwnd: HWND) -> String {
     }
 }
 
-unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> i32 {
+unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> i32 { unsafe {
     let found = &mut *(lparam as *mut Vec<usize>);
     if IsWindowVisible(hwnd) != 0
         && window_title(hwnd).trim_end().ends_with(TITLE_SUFFIX)
@@ -59,7 +59,7 @@ unsafe extern "system" fn collect(hwnd: HWND, lparam: LPARAM) -> i32 {
         found.push(hwnd as usize);
     }
     1
-}
+}}
 
 /// Visible WSJT-X Log QSO windows.
 pub fn find_log_windows() -> Vec<usize> {
