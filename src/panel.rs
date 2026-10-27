@@ -176,7 +176,7 @@ impl<'a> L<'a> {
     fn icon_button(&mut self, x: f32, y: f32, icon: &str, fallback: &str, id: &str) -> (Rect, bool) {
         let (p, f) = (self.p, self.f);
         let (txt, font) = if f.has_icons { (icon, &f.icon_12) } else { (fallback, &f.ui_bold) };
-        let r = Rnd::new(txt, font).pill().pad(8.0, 6.0).colors(p.surface, p.muted).hover(p.neutral).icon();
+        let r = Rnd::new(txt, font).pill().pad(8.0, 6.0).colors(p.head, p.muted).hover(p.neutral).icon();
         let sz = r.size(self.ui);
         let rect = Rect::from_min_size(Pos2::new(x, y), sz);
         let clicked = self.button(&r, rect, Id::unique(("panel-icon", id)), true);
@@ -185,8 +185,16 @@ impl<'a> L<'a> {
 
     /// Title row with a close button; sub-pages get a back arrow before the title.
     fn header(&mut self, title: &str, back: bool) {
-        self.y += 16.0;
         let h = 28.0f32.max(self.f.heading.m.linespace + 2.0);
+        // same header band as the main window's cards: palette `head`, rounded top
+        // corners (the panel's radius 8 less its 1 px border), a rule underneath
+        if self.paint {
+            let band = Rect::from_min_size(Pos2::new(self.left - 20.0, self.y), Vec2::new(self.right - self.left + 40.0, 11.0 + h + 11.0));
+            let top = egui::CornerRadius { nw: 7, ne: 7, sw: 0, se: 0 };
+            self.painter().rect_filled(band.shrink2(Vec2::new(1.0, 1.0)).with_max_y(band.bottom()), top, self.p.head);
+            self.painter().rect_filled(Rect::from_min_size(Pos2::new(band.left(), band.bottom()), Vec2::new(band.width(), 1.0)), 0.0, self.p.border);
+        }
+        self.y += 11.0;
         let mut x = self.left;
         if back {
             let (r, clicked) = self.icon_button(x, self.y + ((h - 28.0) / 2.0).floor(), theme::ICON_BACK, "<", "back");
@@ -202,7 +210,7 @@ impl<'a> L<'a> {
             self.act.push(Do::Close);
         }
         self.need(x - self.left + w + 28.0 + 40.0);
-        self.y += h + 6.0;
+        self.y += h + 11.0 + 1.0 + 6.0;
     }
 
     fn tab_strip(&mut self, current: Tab) {
