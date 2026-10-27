@@ -7,6 +7,7 @@ use chrono::Datelike;
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::app::{App, ATTEMPT_MODES};
+use crate::sound::Kind;
 use crate::theme::{self, Font, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt};
 
@@ -119,9 +120,9 @@ enum Do {
     Changed,
     Theme(&'static str),
     FontSize(u32),
-    Test,
-    Choose,
-    ResetSound,
+    Test(Kind),
+    Choose(Kind),
+    ResetSound(Kind),
     ApplyUdp,
     ResetUdp,
     SaveAclog,
@@ -844,6 +845,33 @@ impl Panel {
         l.nav_row("pota.app account", &app.pota_summary(), Page::Pota);
     }
 
+    /// "Sound file" row with Test / Choose… / Reset buttons for one of the app's sounds.
+    fn sound_file_row(l: &mut L, p: &Palette, kind: Kind, custom: &str) {
+        let sub = if custom.is_empty() {
+            "Default (built in)".to_string()
+        } else {
+            std::path::Path::new(custom).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(custom.to_string())
+        };
+        let mut buttons = vec![("Test", Do::Test(kind)), ("Choose…", Do::Choose(kind))];
+        if !custom.is_empty() {
+            buttons.push(("Reset", Do::ResetSound(kind)));
+        }
+        let widths: Vec<Vec2> = buttons.iter().map(|(t, _)| l.small_button(t).size(l.ui)).collect();
+        let total: f32 = widths.iter().map(|s| s.x + 6.0).sum();
+        let bh = widths.iter().map(|s| s.y).fold(0.0, f32::max);
+        let rect = l.row("Sound file", &sub, total, bh, p.text);
+        if l.paint {
+            let mut x = rect.right() - total + 6.0;
+            for ((t, d), sz) in buttons.into_iter().zip(widths) {
+                let r = Rect::from_min_size(Pos2::new(x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
+                if l.button(&l.small_button(t), r, Id::unique(("sound", kind.name(), t)), true) {
+                    l.act.push(d);
+                }
+                x += sz.x + 6.0;
+            }
+        }
+    }
+
     fn logging_tab(&mut self, app: &mut App, l: &mut L) {
         let (p, f) = (l.p, l.f);
         l.section("WSJT-X");
@@ -854,29 +882,13 @@ impl Panel {
         l.switch_row("Play a sound when a QSO is logged", "Plays when WSJT-X logs any QSO", &mut v, true, 0.0);
         app.s.ding = v;
         let custom = app.s.ding_path.clone();
-        let sub = if custom.is_empty() {
-            "Default (built in)".to_string()
-        } else {
-            std::path::Path::new(&custom).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(custom.clone())
-        };
-        let mut buttons = vec![("Test", Do::Test), ("Choose…", Do::Choose)];
-        if !custom.is_empty() {
-            buttons.push(("Reset", Do::ResetSound));
-        }
-        let widths: Vec<Vec2> = buttons.iter().map(|(t, _)| l.small_button(t).size(l.ui)).collect();
-        let total: f32 = widths.iter().map(|s| s.x + 6.0).sum();
-        let bh = widths.iter().map(|s| s.y).fold(0.0, f32::max);
-        let rect = l.row("Sound file", &sub, total, bh, p.text);
-        if l.paint {
-            let mut x = rect.right() - total + 6.0;
-            for ((t, d), sz) in buttons.into_iter().zip(widths) {
-                let r = Rect::from_min_size(Pos2::new(x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
-                if l.button(&l.small_button(t), r, Id::unique(("sound", t)), true) {
-                    l.act.push(d);
-                }
-                x += sz.x + 6.0;
-            }
-        }
+        Self::sound_file_row(l, p, Kind::Ding, &custom);
+
+        let mut v = app.s.pop;
+        l.switch_row("Play a sound for a wanted park", "Plays when a wanted park is ready to call (only NEW/ATNO parks when hunting new parks only)", &mut v, true, 0.0);
+        app.s.pop = v;
+        let custom = app.s.pop_path.clone();
+        Self::sound_file_row(l, p, Kind::Pop, &custom);
 
         l.section("Also log each QSO to");
         for (key, name, blurb, ready) in LOGGERS {
@@ -1110,18 +1122,25 @@ impl Panel {
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
                 Do::FontSize(pt) => app.set_font_size(ctx, pt),
-                Do::Test => {
-                    crate::sound::play(&app.s.ding_path);
+                Do::Test(k) => {
+                    let path = if matches!(k, Kind::Ding) { &app.s.ding_path } else { &app.s.pop_path };
+                    crate::sound::play(k, path);
                 }
-                Do::Choose => {
-                    if let Some(path) = choose_sound_file() {
-                        app.s.ding_path = path.clone();
+                Do::Choose(k) => {
+                    if let Some(path) = choose_sound_file(k) {
+                        match k {
+                            Kind::Ding => app.s.ding_path = path.clone(),
+                            Kind::Pop => app.s.pop_path = path.clone(),
+                        }
                         app.settings_changed();
-                        crate::sound::play(&path);
+                        crate::sound::play(k, &path);
                     }
                 }
-                Do::ResetSound => {
-                    app.s.ding_path.clear();
+                Do::ResetSound(k) => {
+                    match k {
+                        Kind::Ding => app.s.ding_path.clear(),
+                        Kind::Pop => app.s.pop_path.clear(),
+                    }
                     app.settings_changed();
                 }
                 Do::ResetUdp => {
@@ -1172,10 +1191,11 @@ impl Panel {
 }
 
 /// The sound file picker (a standard Windows Open dialog).
-fn choose_sound_file() -> Option<String> {
+fn choose_sound_file(kind: Kind) -> Option<String> {
     use windows_sys::Win32::UI::Controls::Dialogs::{GetOpenFileNameW, OFN_FILEMUSTEXIST, OFN_PATHMUSTEXIST, OPENFILENAMEW};
     let filter: Vec<u16> = "Sound files\0*.mp3;*.wav;*.wma;*.m4a\0All files\0*.*\0\0".encode_utf16().collect();
-    let title: Vec<u16> = "Sound to play when a QSO is logged\0".encode_utf16().collect();
+    let what = if matches!(kind, Kind::Ding) { "when a QSO is logged" } else { "for a wanted park" };
+    let title: Vec<u16> = format!("Sound to play {what}\0").encode_utf16().collect();
     let mut buf = vec![0u16; 1024];
     let mut ofn: OPENFILENAMEW = unsafe { std::mem::zeroed() };
     ofn.lStructSize = std::mem::size_of::<OPENFILENAMEW>() as u32;

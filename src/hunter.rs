@@ -404,6 +404,8 @@ pub struct Hunter {
     pub park_is_new: Box<dyn Fn(&str) -> bool>,
     /// log lines waiting for the app to show them
     pub logs: Vec<LogLine>,
+    /// set when a wanted candidate is ready to call: any candidate, or only a NEW park when hunting new parks only (the app plays the pop sound)
+    pub wanted_ready: bool,
     /// set when the worked list or skips changed (the app saves and redraws)
     pub worked_changed: bool,
     /// set when the operator halted our CQ and the mode switched itself off
@@ -511,6 +513,7 @@ impl Hunter {
             utcnow,
             park_is_new: Box::new(|_| false),
             logs: Vec::new(),
+            wanted_ready: false,
             worked_changed: false,
             cq_stopped: false,
             log_seen_at: None,
@@ -1410,6 +1413,9 @@ impl Hunter {
             park: park.clone(),
         };
         self.pending.push(cand.clone());
+        if new || !self.new_parks_only {
+            self.wanted_ready = true;
+        }
         // The operator can always call a candidate right now, switching from any target.
         let received = self.now();
         let mut actions = vec![Action { label: "Call now", kind: ActionKind::CallNow { cand, received }, active: None }];

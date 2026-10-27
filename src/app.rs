@@ -749,6 +749,9 @@ impl App {
     fn save_state(&mut self) {
         if !self.state_ready {
             return;
+        if std::mem::take(&mut self.h.wanted_ready) && self.s.pop {
+            sound::play(sound::Kind::Pop, &self.s.pop_path);
+        }
         }
         let path = self.dir.join("data").join("state.json");
         let tmp = self.dir.join("data").join("state.json.tmp");
@@ -882,7 +885,7 @@ impl App {
                     Message::QsoLogged(q) => {
                         let entry = self.h.handle_qso_logged(&q);
                         if self.s.ding {
-                            sound::play(&self.s.ding_path);
+                            sound::play(sound::Kind::Ding, &self.s.ding_path);
                         }
                         if self.s.aclog_enabled {
                             self.aclog.log_qso(q, entry);

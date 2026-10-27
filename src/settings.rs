@@ -44,6 +44,10 @@ pub struct Settings {
     pub ding: bool,
     /// custom sound file; "" = assets/ding.mp3 in the app folder
     pub ding_path: String,
+    /// sound when a candidate at a wanted (NEW) park is ready to call
+    pub pop: bool,
+    /// custom file for it; "" = the built-in pop
+    pub pop_path: String,
     /// keep ATT/NB/DNR off on the Yaesu, via ACLog's CAT passthrough
     pub rig_clean: bool,
     /// on close: "on", "off" or "leave" (the rig can't be read back)
@@ -100,6 +104,8 @@ impl Default for Settings {
             aclog_host: "127.0.0.1".into(),
             aclog_port: 1100,
             adif_path: String::new(),
+            pop: true,
+            pop_path: String::new(),
             pounce_signoffs: true,
             new_parks_only: false,
             pota_user: String::new(),
