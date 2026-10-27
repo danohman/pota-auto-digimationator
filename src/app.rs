@@ -955,15 +955,7 @@ impl App {
                 };
                 self.log(&t, Tag::Error);
             }
-            Event::Aclog(t, Tag::Info) if t.starts_with("CAT:") => {
-                let item = &t[4..];
-                if !self.static_rig.split('/').any(|p| p == item) {
-                    if !self.static_rig.is_empty() {
-                        self.static_rig.push('/');
-                    }
-                    self.static_rig.push_str(item);
-                }
-            }
+            Event::Aclog(t, Tag::Info) if t.starts_with("CAT:") => self.static_rig = t[4..].to_string(),
             Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/DNR off") || t.starts_with("PWR ") => {}
             Event::Aclog(t, tag) => self.log(&t, tag),
             Event::Retune(what, value, result) => {
@@ -2096,9 +2088,12 @@ impl App {
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
             let band = self.h.band().unwrap_or("?");
-            let cat = if self.static_rig.is_empty() { String::new() } else { format!(" [CAT: {}]", self.static_rig) };
-            let text = format!("WSJT-X: {} on {} {} ({:.3} MHz){cat}", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
+            let text = format!("WSJT-X: {} on {} {} ({:.3} MHz)", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
             info.push(StaticLine::new(self.stamp("wsjtx", &text), text));
+        }
+        if !self.static_rig.is_empty() {
+            let text = format!("CAT: {}", self.static_rig);
+            info.push(StaticLine::new(self.stamp("cat", &text), text));
         }
         let logged_in = !self.s.pota_user.is_empty() && !self.s.pota_password.is_empty();
         let counts = self.counts.borrow().clone();

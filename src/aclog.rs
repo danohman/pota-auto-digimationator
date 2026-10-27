@@ -177,19 +177,21 @@ impl AclogClient {
     fn do_set_rig(&self, cmds: &[String], why: &str, quiet: bool) {
         let _g = self.lock.lock().unwrap();
         let result = (|| -> std::io::Result<()> {
-            for (i, cmd) in cmds.iter().enumerate() {
-                if i > 0 {
-                    std::thread::sleep(Duration::from_millis(300)); // CAT wants a gap between commands
-                }
-                self.send(&format!("<CMD><SENDRIGCOMMAND><VALUE>{cmd}</VALUE></CMD>"), false)?;
-                let item = match &cmd[..2] {
-                    "RA" => "ATT",
-                    "NB" => "NB",
-                    "NR" => "DNR",
-                    _ => "PWR",
-                };
-                (self.post)(Event::Aclog(format!("CAT:{item}"), Tag::Info)); // shown in Current Info once sent
-            }
+            // ACLog passes a stack of CAT commands in one SENDRIGCOMMAND (live-tested 2026-10-27)
+            self.send(&format!("<CMD><SENDRIGCOMMAND><VALUE>{}</VALUE></CMD>", cmds.concat()), false)?;
+            let items: Vec<String> = cmds
+                .iter()
+                .map(|c| {
+                    let onoff = if c[2..].starts_with("01") { "on" } else { "off" };
+                    match &c[..2] {
+                        "RA" => format!("ATT {onoff}"),
+                        "NB" => format!("NB {onoff}"),
+                        "NR" => format!("DNR {onoff}"),
+                        _ => format!("PWR {}w", c[2..].trim_end_matches(';').trim_start_matches('0')),
+                    }
+                })
+                .collect();
+            (self.post)(Event::Aclog(format!("CAT:Yaesu: {}", items.join(" / ")), Tag::Info)); // Current Info line once sent
             Ok(())
         })();
         match result {
