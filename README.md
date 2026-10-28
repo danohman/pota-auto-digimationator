@@ -31,7 +31,7 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 
 ## Getting started
 
-The first time it runs (no `data/settings.json` yet) a setup wizard walks you through every setting, explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
+The first time it runs (no `data/settings.json` yet) a setup wizard walks you through every setting (13 pages, including your radio and its COM port), explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
 
 ### 1. Set up WSJT-X
 
@@ -155,7 +155,20 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 
 ## Radio (CAT) settings
 
-**Settings > Radio** connects the program to a Yaesu FTDX101D over its CAT serial port (the **Test CAT Control** button under Handshake briefly changes NB, NR, ATT and power, checks the radio confirms each, puts them back and shows a pass or fail box): choose the radio type, the COM port (any port Windows lists, including virtual ones), data bits (7 or 8), stop bits (1 or 2) and handshake (None, XON/XOFF or Hardware); the defaults are 8, 1 and None at 38400 baud. Nothing is sent until a COM port is chosen. With a port chosen, the program can keep attenuator, noise blanker and noise reduction off and set the transmit power, at start-up and after each band or mode change, and it reads each setting back from the radio to confirm it took (the Current Info line says which port and that it was confirmed). If you don't use that rig, switch it off. On close the program can put each setting back on, off or leave it alone.
+**Settings > Radio** connects the program to your radio over its CAT serial port, so it can keep the receiver clean and set the transmit power for digital work. It is optional, and nothing is sent to the radio until a COM port is chosen.
+
+- **Supported radios** (pick the make, then the model; the setup wizard has the same choices on its Radio connection page):
+  - **Yaesu**: FTDX101D, FTDX101MP, FTDX10, FT-710, FT-991/991A, FT-891, FTDX3000, FTDX1200, FTDX5000, FT-2000, FT-2000D, FT-950, FT-450.
+  - **Kenwood**: TS-590S/SG, TS-890S, TS-990S, TS-2000, TS-480.
+  - **Elecraft**: K3/K3S (with or without a KPA100), KX3, KX2, K4.
+  - **Icom** (CI-V): IC-7000, IC-7100, IC-7300, IC-7300MK2, IC-7410, IC-7600, IC-7610, IC-7700, IC-7800, IC-9100, IC-9700, IC-705, IC-905, or **Other** with the radio's CI-V address in hex (94 is an IC-7300).
+  - **Xiegu**: G90, X6100, X5105.
+
+  **Only the Yaesu FTDX101D has been tried on a real radio.** The other command sets come from the Hamlib project's documentation of each radio's protocol and may need adjusting. If a radio does not accept a setting, the Activity log says it "did not confirm" that one.
+- **Connection**: the COM port (any port Windows lists, including virtual ones), baud rate (must match the radio's own CAT speed; it follows the radio's usual default when you change make: Yaesu 38400, Kenwood 9600, Icom and Xiegu 19200), data bits (7 or 8), stop bits (1 or 2) and handshake (None, XON/XOFF or Hardware). The defaults are 8, 1 and None.
+- **Test CAT Control**: the button briefly changes NB, NR, ATT and power, checks the radio confirms each, puts them back and shows a pass or fail box. It is refused while WSJT-X is transmitting.
+- **What it does**: with a port chosen, the program can keep attenuator (ATT), noise blanker (NB) and noise reduction (NR) off and set the transmit power, at start-up and after each band or mode change. It reads each setting back from the radio to confirm it took (the Current Info line says which radio and port, and that it was confirmed). If you don't use CAT control, leave the receiver switch off. On close the program can put each setting back on, off or leave it alone.
+- **Power limits**: the model sets the maximum power (for example 200 W on the FTDX101MP, 10 W on the IC-705), and a chosen value above it is held to it.
 
 ## Making it yours
 
