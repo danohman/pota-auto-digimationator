@@ -465,6 +465,7 @@ impl App {
         let aclog = AclogClient::new(post.clone(), &s.aclog_host, s.aclog_port);
         let rig = RigClient::new(post.clone());
         rig.set_cfg((!s.rig_com.is_empty()).then(|| crate::cat::Cfg {
+            rig: crate::cat::resolve(&s.rig_type, &s.rig_model, &s.rig_civ),
             port: s.rig_com.clone(),
             baud: s.rig_baud,
             data_bits: s.rig_data_bits,
@@ -710,16 +711,16 @@ impl App {
 
     // --- Rig receive settings (Yaesu over the COM port) ----------------------------------
 
-    /// ATT, NB and DNR off on the main receiver (the radio may remember them per band).
+    /// ATT, NB and NR off on the main receiver (the radio may remember them per band).
     fn rig_clean(&mut self, quiet: bool) {
         let clean = self.s.rig_clean.then_some(false);
         let power = self.s.rig_power;
         if clean.is_some() || power.is_some() {
             self.rig_applied = true;
             let why = match (clean, power) {
-                (Some(_), Some(w)) => format!("ATT/NB/DNR off, PWR {w} W"),
+                (Some(_), Some(w)) => format!("ATT/NB/NR off, PWR {w} W"),
                 (None, Some(w)) => format!("PWR {w} W"),
-                _ => "ATT/NB/DNR off".to_string(),
+                _ => "ATT/NB/NR off".to_string(),
             };
             self.rig.set_rig(clean, clean, clean, power, false, &why, quiet);
         }
@@ -849,6 +850,7 @@ impl App {
         self.move_tx.store(self.s.move_tx, Ordering::SeqCst);
         self.aclog.set_addr(self.s.aclog_host.trim(), self.s.aclog_port);
         self.rig.set_cfg((!self.s.rig_com.is_empty()).then(|| crate::cat::Cfg {
+            rig: crate::cat::resolve(&self.s.rig_type, &self.s.rig_model, &self.s.rig_civ),
             port: self.s.rig_com.clone(),
             baud: self.s.rig_baud,
             data_bits: self.s.rig_data_bits,
@@ -1095,7 +1097,7 @@ impl App {
                 self.log(&t, Tag::Error);
             }
             Event::Aclog(t, Tag::Info) if t.starts_with("CAT:") => self.static_rig = t[4..].to_string(),
-            Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/DNR off") || t.starts_with("PWR ") => {}
+            Event::Aclog(t, Tag::Info) if t.starts_with("ATT/NB/NR off") || t.starts_with("PWR ") => {}
             Event::Aclog(t, tag) => self.log(&t, tag),
             Event::Retune(what, value, result) => {
                 if result != "ok" {
@@ -1278,7 +1280,7 @@ impl App {
             return;
         }
         // Press WSJT-X's band/mode buttons in order on a worker thread (PowerShell takes a
-        // second each); first leave the band with ATT/NB/DNR at their defaults.
+        // second each); first leave the band with ATT/NB/NR at their defaults.
         let post = self.post.clone();
         let band_now = self.h.band().unwrap_or("").to_string();
         let (a, n, d) = self.restore_wants();
@@ -1287,7 +1289,7 @@ impl App {
             .name("retune".into())
             .spawn(move || {
                 if let Some(rig) = rig {
-                    rig.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/DNR back to normal"), false);
+                    rig.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/NR back to normal"), false);
                     std::thread::sleep(Duration::from_millis(500));
                 }
                 for (i, (what, value)) in steps.into_iter().enumerate() {
@@ -3477,7 +3479,7 @@ impl eframe::App for App {
             s.stop();
         }
         self.settings_changed();
-        self.rig_restore("Closing, setting ATT/NB/DNR back to normal");
+        self.rig_restore("Closing, setting ATT/NB/NR back to normal");
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {

@@ -48,7 +48,7 @@ pub struct Settings {
     pub pop: bool,
     /// custom file for it; "" = the built-in pop
     pub pop_path: String,
-    /// keep ATT/NB/DNR off on the Yaesu, over the COM port (cat.rs)
+    /// keep ATT/NB/NR off on the Yaesu, over the COM port (cat.rs)
     pub rig_clean: bool,
     /// on close: "on", "off" or "leave" (the rig can't be read back)
     pub rig_restore_att: String,
@@ -58,8 +58,12 @@ pub struct Settings {
     pub rig_power: Option<u32>,
     /// Tx power in watts set on close; None = leave
     pub rig_power_close: Option<u32>,
-    /// radio make; only "Yaesu" for now
+    /// radio make: "Yaesu", "Kenwood" or "Icom" (cat::MAKES)
     pub rig_type: String,
+    /// Icom CI-V address in hex, used when the model is "Other"
+    pub rig_civ: String,
+    /// radio model within the make (cat::model_names)
+    pub rig_model: String,
     /// CAT serial port such as "COM20"; "" = not chosen
     pub rig_com: String,
     /// 38400 on the user's FTDX101D
@@ -125,6 +129,8 @@ impl Default for Settings {
             rig_power: None,
             rig_power_close: None,
             rig_type: "Yaesu".into(),
+            rig_civ: "94".into(),
+            rig_model: "FTDX101D".into(),
             rig_com: String::new(),
             rig_baud: 38400,
             rig_data_bits: 8,
@@ -202,6 +208,7 @@ pub fn load(path: &Path) -> Settings {
         }
     }
     s.font_size = s.font_size.clamp(8, 16);
+    crate::cat::migrate(&mut s.rig_type, &mut s.rig_model, &s.rig_civ);
     if !matches!(s.rig_data_bits, 7 | 8) {
         s.rig_data_bits = 8;
     }

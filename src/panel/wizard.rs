@@ -9,6 +9,7 @@ use eframe::egui::{self, Color32, Id, Key, Order, Pos2, Rect, Sense, Shape, Stro
 
 use super::{choose_sound_file, stepper_labels_attempts, stepper_labels_power, stepper_labels_snr, Do, Panel, CQ_CHOICES, L, NO_SNR_LIMIT};
 use crate::app::{App, ATTEMPT_MODES, PRESENCE_SECONDS};
+use crate::cat;
 use crate::respot;
 use crate::settings::Settings;
 use crate::sound::{self, Kind};
@@ -27,12 +28,13 @@ enum Step {
     Pota,
     Logging,
     Sounds,
+    RadioConn,
     Radio,
     Review,
 }
 
 /// (page, title, one-line summary under the title)
-const STEPS: [(Step, &str, &str); 12] = [
+const STEPS: [(Step, &str, &str); 13] = [
     (Step::Welcome, "Welcome", "What this program does and how it keeps you in control"),
     (Step::Look, "Appearance", "Light or dark, and how big the text is"),
     (Step::Link, "Connect to WSJT-X", "The address and port this program listens on"),
@@ -43,7 +45,8 @@ const STEPS: [(Step, &str, &str); 12] = [
     (Step::Pota, "pota.app", "Your pota.app login and respotting"),
     (Step::Logging, "Logging", "WSJT-X's Log QSO window and N3FJP ACLog"),
     (Step::Sounds, "Sounds", "What you hear when a QSO is logged or a wanted park appears"),
-    (Step::Radio, "Radio", "Yaesu receiver and power settings sent over the COM port"),
+    (Step::RadioConn, "Radio connection", "Which radio you have and the serial port it is on"),
+    (Step::Radio, "Radio", "Yaesu, Kenwood, Elecraft, Icom or Xiegu receiver and power settings sent over the COM port"),
     (Step::Review, "All set?", "Check your choices, then finish"),
 ];
 
@@ -76,6 +79,9 @@ pub struct Wizard {
     scroll: Scroll,
     /// content height of each page, for (card width, font size, dry run)
     sizes: Option<((i32, u32, bool), Vec<f32>)>,
+    /// the unfolded drop-down on the radio connection page, and the COM ports it lists
+    dd: Option<&'static str>,
+    ports: Vec<String>,
 }
 
 fn help(l: &mut L, s: &str) {
@@ -128,6 +134,8 @@ impl Wizard {
             error: String::new(),
             scroll: Scroll::default(),
             sizes: None,
+            dd: None,
+            ports: vec![],
         }
     }
 
@@ -190,7 +198,7 @@ impl Wizard {
         }
         let v: Vec<f32> = (0..STEPS.len())
             .map(|i| {
-                let mut l = L { ui: &mut *ui, paint: false, left: SIDE, right: width - SIDE, y: 0.0, p, f, sections: 0, need_w: 0.0, act: vec![] };
+                let mut l = L { ui: &mut *ui, paint: false, left: SIDE, right: width - SIDE, y: 0.0, p, f, sections: 0, need_w: 0.0, act: vec![], anchor: Rect::NOTHING };
                 self.body(app, &mut l, i);
                 l.y + 8.0 + 20.0
             })
@@ -247,7 +255,7 @@ impl Wizard {
         let mut child = ui.new_child(UiBuilder::new().max_rect(body));
         child.set_clip_rect(body.intersect(ui.clip_rect()));
         let acts = {
-            let mut l = L { ui: &mut child, paint: true, left: card.left() + SIDE, right: card.right() - SIDE, y: body.top() + 8.0 - self.scroll.offset, p: &p, f: &f, sections: 0, need_w: 0.0, act: vec![] };
+            let mut l = L { ui: &mut child, paint: true, left: card.left() + SIDE, right: card.right() - SIDE, y: body.top() + 8.0 - self.scroll.offset, p: &p, f: &f, sections: 0, need_w: 0.0, act: vec![], anchor: Rect::NOTHING };
             self.body(app, &mut l, self.step);
             std::mem::take(&mut l.act)
         };
@@ -338,6 +346,7 @@ impl Wizard {
                 Nav::Back => {
                     let _ = self.commit(app, step);
                     self.step -= 1;
+                    self.dd = None;
                     self.error.clear();
                     self.scroll.offset = 0.0;
                 }
@@ -356,6 +365,7 @@ impl Wizard {
                     },
                     Ok(()) => {
                         self.step += 1;
+                        self.dd = None;
                         self.error.clear();
                         self.scroll.offset = 0.0;
                     }
@@ -452,7 +462,7 @@ impl Wizard {
                 bullet(l, "WSJT-X or WSJT-X Improved installed. It does not have to be running yet, but you need it to finish the connection.");
                 bullet(l, "Optional: your pota.app login, so the program can show which parks are new to you.");
                 bullet(l, "Optional: N3FJP ACLog, if you want every QSO logged there too.");
-                bullet(l, "Optional: a Yaesu FTDX101D controlled over its COM port, for the receiver and power settings.");
+                bullet(l, "Optional: a Yaesu FTDX101D, Kenwood TS-590S/SG/TS-890S Elecraft, Icom or Xiegu radio controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
                 l.section("You stay in control");
                 lead(l, &format!("Amateur radio rules require a control operator at the station, so fully automatic, unattended operation is not allowed. To keep it that way the program starts with Auto-Hunt and Auto CQ/Answer switched off, asks you to confirm every time you turn one on, and asks \"Are you still there?\" every {} minutes while either is on. If you do not answer, it switches itself off.", (PRESENCE_SECONDS / 60.0) as u32));
@@ -613,13 +623,116 @@ impl Wizard {
                 let custom = app.s.pop_path.clone();
                 Panel::sound_file_row(l, p, Kind::Pop, &custom);
             }
+            Step::RadioConn => {
+                lead(l, "If your radio has a serial (COM or USB) CAT port, the program can set its receiver and transmit power for you on the next page. This is optional: with no port chosen, nothing is ever sent to the radio. You can also set it up later in Settings > Radio, where a Test CAT Control button checks that the radio answers.");
+                l.section("Radio");
+                if l.dropdown_row("Radio make", "Which CAT command set to use", "wiz-make", &app.s.rig_type, &cat::MAKES) {
+                    self.dd = if self.dd == Some("make") { None } else { Some("make") };
+                }
+                if self.dd == Some("make") {
+                    let labels: Vec<String> = cat::MAKES.iter().map(|m| m.to_string()).collect();
+                    let cur = cat::MAKES.iter().position(|m| *m == app.s.rig_type);
+                    match l.dropdown_list("wiz-make", &labels, cur) {
+                        Some(Some(i)) => {
+                            // a baud rate still at the old radio's default follows the new radio
+                            let old = cat::resolve(&app.s.rig_type, &app.s.rig_model, &app.s.rig_civ);
+                            app.s.rig_type = cat::MAKES[i].to_string();
+                            app.s.rig_model = cat::model_names(cat::MAKES[i])[0].to_string();
+                            let new = cat::resolve(&app.s.rig_type, &app.s.rig_model, &app.s.rig_civ);
+                            if app.s.rig_baud == old.default_baud() {
+                                app.s.rig_baud = new.default_baud();
+                            }
+                            self.dd = None;
+                        }
+                        Some(None) => self.dd = None,
+                        None => {}
+                    }
+                }
+                let models = cat::model_names(&app.s.rig_type);
+                if l.dropdown_row("Radio model", "Most are untested; only the Yaesu FTDX101D has been tried on a real radio", "wiz-model", &app.s.rig_model, &models) {
+                    self.dd = if self.dd == Some("model") { None } else { Some("model") };
+                }
+                if self.dd == Some("model") {
+                    let labels: Vec<String> = models.iter().map(|m| m.to_string()).collect();
+                    let cur = models.iter().position(|m| *m == app.s.rig_model);
+                    match l.dropdown_list("wiz-model", &labels, cur) {
+                        Some(Some(i)) => {
+                            app.s.rig_model = models[i].to_string();
+                            self.dd = None;
+                        }
+                        Some(None) => self.dd = None,
+                        None => {}
+                    }
+                }
+                if app.s.rig_type == "Icom" && app.s.rig_model == cat::ICOM_OTHER {
+                    let mut buf = app.s.rig_civ.clone();
+                    l.form(&mut [("CI-V address (hex)", &mut buf, 4.0, false)], 4.0, false);
+                    app.s.rig_civ = buf;
+                    help(l, "The radio's CI-V address in hex (94 is an IC-7300). Power is then assumed to be 100 W full scale and the attenuator 20 dB.");
+                }
+                help(l, "Pick the make, then the model. Models with the same make share one command set; the model sets the maximum transmit power and, for Icom and Xiegu, the CI-V address.");
+                l.section("Serial port");
+                let com = if app.s.rig_com.is_empty() { "Choose…".to_string() } else { app.s.rig_com.clone() };
+                if l.dropdown_row("COM port", "The radio's CAT serial port", "wiz-com", &com, &["COM20", "Choose…"]) {
+                    if self.dd == Some("com") {
+                        self.dd = None;
+                    } else {
+                        self.ports = crate::comports::list();
+                        self.dd = Some("com");
+                    }
+                }
+                if self.dd == Some("com") {
+                    let labels: Vec<String> = if self.ports.is_empty() { vec!["No COM ports found".to_string()] } else { self.ports.clone() };
+                    let cur = self.ports.iter().position(|p| *p == app.s.rig_com);
+                    match l.dropdown_list("wiz-com", &labels, cur) {
+                        Some(Some(i)) => {
+                            if let Some(port) = self.ports.get(i) {
+                                app.s.rig_com = port.clone();
+                            }
+                            self.dd = None;
+                        }
+                        Some(None) => self.dd = None,
+                        None => {}
+                    }
+                }
+                const BAUDS: [u32; 6] = [4800, 9600, 19200, 38400, 57600, 115200];
+                let labels: Vec<String> = BAUDS.iter().map(|b| b.to_string()).collect();
+                let wide: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+                if l.dropdown_row("Baud rate", "Must match the radio's CAT speed", "wiz-baud", &app.s.rig_baud.to_string(), &wide) {
+                    self.dd = if self.dd == Some("baud") { None } else { Some("baud") };
+                }
+                if self.dd == Some("baud") {
+                    let cur = BAUDS.iter().position(|b| *b == app.s.rig_baud);
+                    match l.dropdown_list("wiz-baud", &labels, cur) {
+                        Some(Some(i)) => {
+                            app.s.rig_baud = BAUDS[i];
+                            self.dd = None;
+                        }
+                        Some(None) => self.dd = None,
+                        None => {}
+                    }
+                }
+                let bits = app.s.rig_data_bits.to_string();
+                if let Some(v) = l.segmented_row("Data bits", "", "wiz-bits", &[("7", "7"), ("8", "8")], &bits) {
+                    app.s.rig_data_bits = v.parse().unwrap_or(8);
+                }
+                let stop = app.s.rig_stop_bits.to_string();
+                if let Some(v) = l.segmented_row("Stop bits", "", "wiz-stop", &[("1", "1"), ("2", "2")], &stop) {
+                    app.s.rig_stop_bits = v.parse().unwrap_or(1);
+                }
+                let hs = app.s.rig_handshake.clone();
+                if let Some(v) = l.segmented_row("Handshake", "", "wiz-handshake", &[("none", "None"), ("xonxoff", "XON/XOFF"), ("hardware", "Hardware")], &hs) {
+                    app.s.rig_handshake = v.to_string();
+                }
+                help(l, "The baud rate must match the radio's own CAT setting (Yaesu FTDX101D over USB: 38400; Kenwood menu default: 9600; Icom: 19200 or Auto). Eight data bits, one stop bit and no handshake suit almost every radio; change them only if your radio's manual says so. A radio on a USB cable appears as a COM port once its driver is installed.");
+            }
             Step::Radio => {
-                lead(l, "These settings are for a Yaesu FTDX101D: the program sends the radio CAT commands straight to its COM port and reads them back to confirm. Choose the COM port, data bits, stop bits and handshake in Settings > Radio after setup; until a port is chosen nothing is sent. If you have a different radio, switch the first one off and leave the power settings on Leave.");
+                lead(l, "These settings go to the radio chosen on the previous page: the program sends the CAT commands straight to its COM port and reads them back to confirm. Until a port is chosen nothing is sent. If you have no CAT-controlled radio, switch the first one off and leave the power settings on Leave.");
                 l.section("Receiver");
-                switch(l, "Keep ATT, NB and DNR off", "Sent at start-up and after each band change", &mut app.s.rig_clean,
+                switch(l, "Keep ATT, NB and NR off", "Sent at start-up and after each band change", &mut app.s.rig_clean,
                        "Attenuator, noise blanker and noise reduction hurt weak-signal digital decoding, and the radio may remember them for each band. When on, the program turns all three off for the main receiver two seconds after it starts and again after every band or mode change.");
                 let choices = [("leave", "Leave"), ("off", "Off"), ("on", "On")];
-                for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "DNR")] {
+                for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "NR")] {
                     let cur = match key {
                         "att" => app.s.rig_restore_att.clone(),
                         "nb" => app.s.rig_restore_nb.clone(),
@@ -675,7 +788,8 @@ impl Wizard {
                     ("pota.app", if s.pota_user.is_empty() { "no login".to_string() } else { format!("{}, respot {}", s.pota_user, on(s.respot)) }),
                     ("Logging", format!("press OK {}, ACLog {}", on(s.auto_log), if s.aclog_enabled { format!("on ({}:{})", s.aclog_host, s.aclog_port) } else { "off".to_string() })),
                     ("Sounds", format!("QSO logged {}, wanted park {}", on(s.ding), on(s.pop))),
-                    ("Radio", format!("ATT/NB/DNR off {}, Tx power {}", on(s.rig_clean), s.rig_power.map_or("left alone".to_string(), |w| format!("{w} W")))),
+                    ("Radio connection", if s.rig_com.is_empty() { format!("{} {}, no port chosen (nothing will be sent)", s.rig_type, s.rig_model) } else { format!("{} {} on {}, {} baud", s.rig_type, s.rig_model, s.rig_com, s.rig_baud) }),
+                    ("Radio", format!("ATT/NB/NR off {}, Tx power {}", on(s.rig_clean), s.rig_power.map_or("left alone".to_string(), |w| format!("{w} W")))),
                 ];
                 for (title, value) in rows {
                     l.row(title, &value, 0.0, 0.0, p.text);

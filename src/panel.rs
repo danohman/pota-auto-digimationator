@@ -157,6 +157,8 @@ struct L<'a> {
     /// the widest row asked for (for the panel's width)
     need_w: f32,
     act: Vec<Do>,
+    /// where the last drop-down box was drawn (its list floats under it)
+    anchor: Rect,
 }
 
 impl<'a> L<'a> {
@@ -433,8 +435,8 @@ impl<'a> L<'a> {
     }
 
     /// A row whose right side is a drop-down box showing `value`; true when clicked
-    /// (the caller unfolds the choices with `option_row`, inside the panel so a click on
-    /// one never counts as a click outside it).
+    /// (the caller then shows the choices with `dropdown_list`, which floats under the box;
+    /// a click on it is not a click outside the panel).
     fn dropdown_row(&mut self, title: &str, subtitle: &str, id: &str, value: &str, wide: &[&str]) -> bool {
         let (p, f) = (self.p, self.f);
         let arrow = " ▾";
@@ -444,27 +446,62 @@ impl<'a> L<'a> {
         let sz = r.size(self.ui);
         let rect = self.row(title, subtitle, sz.x + 16.0, sz.y, p.text);
         let at = Rect::from_min_size(Pos2::new(rect.right() - sz.x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
+        self.anchor = at;
         self.button(&r, at, Id::unique(("dropdown", id)), true)
     }
 
-    /// One unfolded choice of a drop-down, ticked when it is the current one.
-    fn option_row(&mut self, label: &str, selected: bool) -> bool {
-        let (p, f) = (self.p, self.f);
-        let h = f.ui.m.linespace + 2.0 * BD + 8.0;
-        let rect = Rect::from_min_size(Pos2::new(self.left, self.y), Vec2::new(self.right - self.left, h));
-        self.need(measure(&f.ui, label) + 60.0);
-        self.y += h;
+    /// The choices of the drop-down just drawn with `dropdown_row`, floating under its box
+    /// like a normal drop-down (a second Area above the panel, so it takes no room in the
+    /// layout and may reach past the panel's edge). Some(Some(i)) when choice i was
+    /// clicked, Some(None) when the user clicked anywhere else (close it).
+    fn dropdown_list(&mut self, id: &str, labels: &[String], selected: Option<usize>) -> Option<Option<usize>> {
         if !self.paint {
-            return false;
+            return None;
         }
-        let resp = self.ui.interact(rect, Id::unique(("option", label)), Sense::click());
-        if resp.hovered() {
-            self.painter().rect_filled(rect, ui::radius(4.0), p.select);
-            self.ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        let (p, f) = (self.p, self.f);
+        let ctx = self.ui.ctx().clone();
+        let anchor = self.anchor;
+        let row_h = f.ui.m.linespace + 2.0 * BD + 8.0;
+        let widest = labels.iter().map(|s| measure(&f.ui, s)).fold(0.0, f32::max);
+        let w = (widest + 30.0 + 16.0 + 8.0).max(anchor.width());
+        let h = row_h * labels.len() as f32 + 8.0;
+        let screen = ctx.content_rect();
+        let below = anchor.bottom() + 2.0;
+        let y = if below + h <= screen.bottom() || anchor.top() - 2.0 - h < screen.top() {
+            below.min(screen.bottom() - h).max(screen.top())
+        } else {
+            anchor.top() - 2.0 - h
+        };
+        let x = (anchor.right() - w).max(screen.left());
+        let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
+        ctx.data_mut(|d| d.insert_temp(Id::new("dropdown-rect"), rect));
+        let mut out = None;
+        egui::Area::new(Id::unique(("dropdown-list", id))).order(Order::Foreground).fixed_pos(rect.min).constrain(false).show(&ctx, |aui| {
+            let _ = aui.allocate_exact_size(rect.size(), Sense::click());
+            let painter = aui.painter().clone();
+            painter.rect_filled(rect, ui::radius(6.0), p.surface);
+            painter.rect_stroke(rect, ui::radius(6.0), Stroke::new(1.0, p.border), StrokeKind::Inside);
+            for (i, label) in labels.iter().enumerate() {
+                let r = Rect::from_min_size(Pos2::new(rect.left() + 4.0, rect.top() + 4.0 + i as f32 * row_h), Vec2::new(w - 8.0, row_h));
+                let resp = aui.interact(r, Id::unique(("dropdown-option", id, i)), Sense::click());
+                if resp.hovered() {
+                    painter.rect_filled(r, ui::radius(4.0), p.select);
+                    aui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+                ui::text(aui, &painter, Pos2::new(r.left() + 8.0, r.top() + 4.0 + BD), if selected == Some(i) { "✓" } else { "" }, &f.ui, p.accent);
+                ui::text(aui, &painter, Pos2::new(r.left() + 30.0, r.top() + 4.0 + BD), label, &f.ui, p.text);
+                if resp.clicked() {
+                    out = Some(Some(i));
+                }
+            }
+        });
+        if out.is_none() {
+            let elsewhere = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|q| !rect.contains(q) && !anchor.contains(q)));
+            if elsewhere {
+                out = Some(None);
+            }
         }
-        self.text(rect.left() + 8.0, rect.top() + 4.0 + BD, if selected { "✓" } else { "" }, &f.ui, p.accent);
-        self.text(rect.left() + 30.0, rect.top() + 4.0 + BD, label, &f.ui, p.text);
-        resp.clicked()
+        out
     }
 
     fn small_button(&self, text: &'a str) -> Rnd<'a> {
@@ -653,7 +690,7 @@ impl Panel {
     /// Lay out (and with `paint`, draw) the current page; returns the stack.
     fn build<'a>(&mut self, app: &mut App, ui: &'a mut Ui, rect: Rect, paint: bool, tab: Tab) -> (f32, f32, Vec<Do>) {
         let (p, f) = (app.p.clone(), app.f.clone());
-        let mut l = L { ui, paint, left: rect.left() + 20.0, right: rect.right() - 20.0, y: rect.top(), p: &p, f: &f, sections: 0, need_w: WIDTH, act: vec![] };
+        let mut l = L { ui, paint, left: rect.left() + 20.0, right: rect.right() - 20.0, y: rect.top(), p: &p, f: &f, sections: 0, need_w: WIDTH, act: vec![], anchor: Rect::NOTHING };
         match self.page {
             Page::Main => {
                 l.header("Settings", false);
@@ -893,18 +930,60 @@ impl Panel {
 
     fn radio_tab(&mut self, app: &mut App, l: &mut L) {
         l.section("Radio connection");
-        const TYPES: [&str; 1] = ["Yaesu"];
-        if l.dropdown_row("Radio type", "Which CAT command set to use", "type", &app.s.rig_type, &TYPES) {
+        use crate::cat;
+        if l.dropdown_row("Radio make", "Which CAT command set to use", "type", &app.s.rig_type, &cat::MAKES) {
             self.dd = if self.dd == Some("type") { None } else { Some("type") };
         }
         if self.dd == Some("type") {
-            for t in TYPES {
-                if l.option_row(t, t == app.s.rig_type) {
-                    app.s.rig_type = t.to_string();
+            let labels: Vec<String> = cat::MAKES.iter().map(|m| m.to_string()).collect();
+            let cur = cat::MAKES.iter().position(|m| *m == app.s.rig_type);
+            match l.dropdown_list("type", &labels, cur) {
+                Some(Some(i)) => {
+                    // a baud rate still at the old radio's default follows the new radio
+                    let old = cat::resolve(&app.s.rig_type, &app.s.rig_model, &app.s.rig_civ);
+                    app.s.rig_type = cat::MAKES[i].to_string();
+                    app.s.rig_model = cat::model_names(cat::MAKES[i])[0].to_string();
+                    let new = cat::resolve(&app.s.rig_type, &app.s.rig_model, &app.s.rig_civ);
+                    if app.s.rig_baud == old.default_baud() {
+                        app.s.rig_baud = new.default_baud();
+                    }
                     self.dd = None;
                     l.act.push(Do::Changed);
                 }
+                Some(None) => self.dd = None,
+                None => {}
             }
+        }
+        let models = cat::model_names(&app.s.rig_type);
+        if l.dropdown_row("Radio model", "Most are untested; only the Yaesu FTDX101D has been tried on a real radio", "model", &app.s.rig_model, &models) {
+            self.dd = if self.dd == Some("model") { None } else { Some("model") };
+        }
+        if self.dd == Some("model") {
+            let labels: Vec<String> = models.iter().map(|m| m.to_string()).collect();
+            let cur = models.iter().position(|m| *m == app.s.rig_model);
+            match l.dropdown_list("model", &labels, cur) {
+                Some(Some(i)) => {
+                    app.s.rig_model = models[i].to_string();
+                    self.dd = None;
+                    l.act.push(Do::Changed);
+                }
+                Some(None) => self.dd = None,
+                None => {}
+            }
+        }
+        if app.s.rig_type == "Icom" && app.s.rig_model == cat::ICOM_OTHER {
+            let mut buf = app.s.rig_civ.clone();
+            l.form(&mut [("CI-V address (hex)", &mut buf, 4.0, false)], 4.0, false);
+            if buf != app.s.rig_civ {
+                app.s.rig_civ = buf;
+                l.act.push(Do::Changed);
+            }
+            let sub = if cat::parse_civ(&app.s.rig_civ).is_none() {
+                "That is not a hex address; 94 (IC-7300) is used until it is."
+            } else {
+                "Power is assumed to be 100 W full scale and ATT 20 dB."
+            };
+            l.paragraph(sub, &l.f.small, l.p.muted, l.right - l.left, 0.0, 4.0);
         }
         let com = if app.s.rig_com.is_empty() { "Choose…".to_string() } else { app.s.rig_com.clone() };
         let sub = if !app.s.rig_com.is_empty() && !self.ports.is_empty() && !self.ports.contains(&app.s.rig_com) {
@@ -921,15 +1000,36 @@ impl Panel {
             }
         }
         if self.dd == Some("com") {
-            if self.ports.is_empty() {
-                l.option_row("No COM ports found", false);
+            let labels: Vec<String> = if self.ports.is_empty() { vec!["No COM ports found".to_string()] } else { self.ports.clone() };
+            let cur = self.ports.iter().position(|p| *p == app.s.rig_com);
+            match l.dropdown_list("com", &labels, cur) {
+                Some(Some(i)) => {
+                    if let Some(port) = self.ports.get(i) {
+                        app.s.rig_com = port.clone();
+                        l.act.push(Do::Changed);
+                    }
+                    self.dd = None;
+                }
+                Some(None) => self.dd = None,
+                None => {}
             }
-            for port in self.ports.clone() {
-                if l.option_row(&port, port == app.s.rig_com) {
-                    app.s.rig_com = port;
+        }
+        const BAUDS: [u32; 6] = [4800, 9600, 19200, 38400, 57600, 115200];
+        let labels: Vec<String> = BAUDS.iter().map(|b| b.to_string()).collect();
+        let wide: Vec<&str> = labels.iter().map(|s| s.as_str()).collect();
+        if l.dropdown_row("Baud rate", "Must match the radio's CAT speed (Kenwood menu default 9600)", "baud", &app.s.rig_baud.to_string(), &wide) {
+            self.dd = if self.dd == Some("baud") { None } else { Some("baud") };
+        }
+        if self.dd == Some("baud") {
+            let cur = BAUDS.iter().position(|b| *b == app.s.rig_baud);
+            match l.dropdown_list("baud", &labels, cur) {
+                Some(Some(i)) => {
+                    app.s.rig_baud = BAUDS[i];
                     self.dd = None;
                     l.act.push(Do::Changed);
                 }
+                Some(None) => self.dd = None,
+                None => {}
             }
         }
         let bits = app.s.rig_data_bits.to_string();
@@ -952,20 +1052,26 @@ impl Panel {
             let label = if testing { "Testing…" } else { "Test CAT Control" };
             let b = l.small_button(label);
             let sz = b.size(l.ui);
-            let rect = l.row("Test CAT control", "Briefly changes NB, NR, ATT and power, checks the radio confirms each, and puts them back", sz.x + 16.0, sz.y, l.p.text);
+            // the button stands where a row's title would be, with the explanation under it
+            let sub = "Briefly changes NB, NR, ATT and power, checks the radio confirms each, and puts them back";
+            l.y += 8.0;
             if l.paint {
-                let r = Rect::from_min_size(Pos2::new(rect.right() - sz.x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
+                let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
                 if l.button(&b, r, Id::unique("test-cat"), !testing) {
                     l.act.push(Do::TestCat);
                 }
             }
+            l.y += sz.y + 4.0;
+            let w = l.text(l.left, l.y + 1.0, sub, &l.f.small, l.p.muted);
+            l.need(w + 40.0);
+            l.y += l.f.small.m.linespace + 2.0 + 8.0;
         }
-        l.section("Radio receive (Yaesu, via the COM port)");
+        l.section("Radio receive (via the COM port)");
         let mut v = app.s.rig_clean;
-        l.switch_row("Keep ATT, NB and DNR off", "Sent at start-up and after each band or mode change", &mut v, true, 0.0);
+        l.switch_row("Keep ATT, NB and NR off", "Sent at start-up and after each band or mode change", &mut v, true, 0.0);
         app.s.rig_clean = v;
         let choices = [("leave", "Leave"), ("off", "Off"), ("on", "On")];
-        for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "DNR")] {
+        for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "NR")] {
             let cur = match key {
                 "att" => app.s.rig_restore_att.clone(),
                 "nb" => app.s.rig_restore_nb.clone(),
@@ -980,7 +1086,7 @@ impl Panel {
                 l.act.push(Do::Changed);
             }
         }
-        l.section("Radio Tx power (Yaesu, via the COM port)");
+        l.section("Radio Tx power (via the COM port)");
         let (vals, labels) = stepper_labels_power();
         let cur = app.s.rig_power.unwrap_or(0);
         let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
@@ -1248,6 +1354,7 @@ impl Panel {
             ctx.request_repaint_after(std::time::Duration::from_millis(15));
         }
         let mut acts = vec![];
+        ctx.data_mut(|d| d.remove::<Rect>(Id::new("dropdown-rect")));
         egui::Area::new(Id::unique("settings-panel"))
             .order(Order::Foreground)
             .fixed_pos(rect.min)
@@ -1272,7 +1379,9 @@ impl Panel {
             });
         // keyboard: Esc steps out of a sub-page first; Enter saves a sub-page
         let (esc, enter) = ctx.input(|i| (i.key_pressed(Key::Escape), i.key_pressed(Key::Enter)));
-        if esc {
+        if esc && self.dd.is_some() {
+            self.dd = None; // Esc closes an open drop-down first
+        } else if esc {
             acts.push(Do::Back);
         }
         if enter {
@@ -1285,7 +1394,8 @@ impl Panel {
             }
         }
         // a click elsewhere (or another app taking focus) closes it, like losing focus
-        let pressed_out = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|q| !rect.contains(q)));
+        let list = ctx.data(|d| d.get_temp::<Rect>(Id::new("dropdown-rect")));
+        let pressed_out = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|q| !rect.contains(q) && !list.is_some_and(|r| r.contains(q))));
         let on_gear = ctx.input(|i| i.pointer.interact_pos().is_some_and(|q| gear.contains(q)));
         let focused = ctx.input(|i| i.focused);
         if app.dialog_open() {

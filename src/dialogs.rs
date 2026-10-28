@@ -100,7 +100,7 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             if *ok {
                 v.push(para("Every setting was changed, confirmed by the radio, and put back as it was.", &f.small, p.muted, 10.0));
             } else {
-                v.push(para("Anything the test changed was put back where it could be; check the radio's ATT, NB, DNR and power.", &f.small, p.muted, 10.0));
+                v.push(para("Anything the test changed was put back where it could be; check the radio's ATT, NB, NR and power.", &f.small, p.muted, 10.0));
             }
             (title.into(), head.into(), color, v)
         }
