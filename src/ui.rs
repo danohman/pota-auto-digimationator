@@ -26,9 +26,9 @@ thread_local! {
 fn family_face(f: &Font) -> (&'static str, i32) {
     match &f.id.family {
         egui::FontFamily::Name(n) => match n.as_ref() {
-            "ui" => ("Segoe UI Variable Text", 400),
-            "ui-bold" => ("Segoe UI Variable Text", 700),
-            "display-bold" => ("Segoe UI Variable Display", 700),
+            "ui" => ("Segoe UI", 400),
+            "ui-bold" => ("Segoe UI", 700),
+            "display-bold" => ("Segoe UI", 700),
             "mono" => ("Cascadia Mono", 400),
             "mono-bold" => ("Cascadia Mono", 700),
             "icons" => ("Segoe Fluent Icons", 400),

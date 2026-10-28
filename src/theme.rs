@@ -387,7 +387,7 @@ impl Font {
     }
 }
 
-/// Named fonts: Segoe UI Variable Text / Cascadia Mono / Segoe Fluent Icons, with the
+/// Named fonts: Segoe UI / Cascadia Mono / Segoe Fluent Icons, with the
 /// usual fallbacks.
 #[derive(Clone, Debug)]
 pub struct Fonts {
@@ -474,12 +474,10 @@ impl Fonts {
                 l.defs.font_data.insert(name.into(), Arc::new(FontData::from_owned(bytes)));
             }
         }
-        let ui_faces = ["Segoe UI Variable Text", "Segoe UI"];
+        let ui_faces = ["Segoe UI"];
         load_face(&mut l, "ui", &ui_faces, 400, Some("Regular"));
         load_face(&mut l, "ui-bold", &ui_faces, 700, Some("Bold Text"));
-        if !load_face(&mut l, "display-bold", &["Segoe UI Variable Display"], 700, Some("Bold Display")) {
-            load_face(&mut l, "display-bold", &ui_faces, 700, Some("Bold Text"));
-        }
+        load_face(&mut l, "display-bold", &ui_faces, 700, Some("Bold Text"));
         let mono_faces = ["Cascadia Mono", "Consolas"];
         load_face(&mut l, "mono", &mono_faces, 400, None);
         load_face(&mut l, "mono-bold", &mono_faces, 700, None);
