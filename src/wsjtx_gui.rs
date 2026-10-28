@@ -95,6 +95,31 @@ pub fn mode_button(mode: &str) -> Option<String> {
     MODES.contains(&mode).then(|| format!("{PANEL}{}Button", mode.to_lowercase()))
 }
 
+/// WSJT-X's default dial frequency (Hz) for `band` in `mode`; None when unknown (FT2 has
+/// no table here).
+pub fn dial_hz(band: &str, mode: &str) -> Option<u64> {
+    let (ft8, ft4): (u64, u64) = match band {
+        "160m" => (1_840_000, 1_840_000),
+        "80m" => (3_573_000, 3_575_000),
+        "60m" => (5_357_000, 5_357_000),
+        "40m" => (7_074_000, 7_047_500),
+        "30m" => (10_136_000, 10_140_000),
+        "20m" => (14_074_000, 14_080_000),
+        "17m" => (18_100_000, 18_104_000),
+        "15m" => (21_074_000, 21_140_000),
+        "12m" => (24_915_000, 24_919_000),
+        "10m" => (28_074_000, 28_180_000),
+        "6m" => (50_313_000, 50_318_000),
+        "2m" => (144_174_000, 144_170_000),
+        _ => return None,
+    };
+    match mode {
+        "FT8" => Some(ft8),
+        "FT4" => Some(ft4),
+        _ => None,
+    }
+}
+
 /// Press WSJT-X's button for `band`. Ok("ok"), Ok("unknown") (not a band we know) or
 /// Ok("notfound"); Err if PowerShell can't be run.
 pub fn set_band(band: &str) -> Result<String, String> {
@@ -168,6 +193,13 @@ mod tests {
         assert!(band_button("20m").unwrap().ends_with(".pb20"));
         assert!(band_button("160m").unwrap().ends_with(".pb160"));
         assert!(mode_button("FT4").unwrap().ends_with(".ft4Button"));
+    }
+
+    #[test]
+    fn dial_frequencies() {
+        assert_eq!(dial_hz("40m", "FT8"), Some(7_074_000));
+        assert_eq!(dial_hz("20m", "FT4"), Some(14_080_000));
+        assert_eq!(dial_hz("20m", "FT2"), None);
     }
 
     #[test]

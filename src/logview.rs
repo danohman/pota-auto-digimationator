@@ -100,6 +100,7 @@ impl LogView {
 
     /// Append a line; `actions` become buttons right after the timestamp.
     pub fn add(&mut self, ts: String, text: String, tag: Tag, actions: Vec<Action>, new: bool) {
+        let text = crate::logdialog::localize(&text);
         if tag == Tag::Summary {
             // Replace the previous summary line instead of piling them up.
             self.lines.retain(|l| !l.summary);

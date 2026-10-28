@@ -7,6 +7,9 @@
 //! straight to that window; Qt routes it to the dialog's focus widget and the default
 //! button fires, without stealing focus from other apps.
 
+use std::sync::Mutex;
+use std::time::Instant;
+
 use windows_sys::Win32::Foundation::{CloseHandle, HWND, LPARAM};
 use windows_sys::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -68,6 +71,57 @@ pub fn find_log_windows() -> Vec<usize> {
         EnumWindows(Some(collect), &mut found as *mut _ as LPARAM);
     }
     found
+}
+
+static APP_NAME: Mutex<String> = Mutex::new(String::new());
+static APP_CHECKED: Mutex<Option<Instant>> = Mutex::new(None);
+
+/// Which program is running: "WSJT-X", "WSJT-X Improved" (ws.exe) or "WSJT-Z" (wsjtx.exe
+/// whose title says WSJT-Z MOD). The UDP client id can't tell: WSJT-Z reports "WSJT-X".
+pub fn app_name() -> String {
+    let n = APP_NAME.lock().unwrap().clone();
+    if n.is_empty() { "WSJT-X".into() } else { n }
+}
+
+/// Look at the running windows again, at most every 15 s.
+pub fn refresh_app_name(client_id: &str) {
+    // Improved reports "WS"; stock WSJT-X and WSJT-Z both report "WSJT-X". A different id
+    // than last time means the operator switched programs, so look again at once.
+    static LAST_ID: Mutex<String> = Mutex::new(String::new());
+    let switched = std::mem::replace(&mut *LAST_ID.lock().unwrap(), client_id.to_string()) != client_id;
+    let mut last = APP_CHECKED.lock().unwrap();
+    if !switched && last.is_some_and(|t| t.elapsed().as_secs() < 5) {
+        return;
+    }
+    *last = Some(Instant::now());
+    let name = if client_id == "WS" {
+        "WSJT-X Improved"
+    } else {
+        let mut wins: Vec<usize> = Vec::new();
+        unsafe {
+            EnumWindows(Some(collect_any), &mut wins as *mut _ as LPARAM);
+        }
+        let z = wins.iter().any(|&w| exe_name(w as HWND) == "wsjtx.exe" && window_title(w as HWND).contains("WSJT-Z"));
+        if z { "WSJT-Z" } else { "WSJT-X" }
+    };
+    *APP_NAME.lock().unwrap() = name.into();
+}
+
+unsafe extern "system" fn collect_any(hwnd: HWND, lparam: LPARAM) -> i32 { unsafe {
+    let found = &mut *(lparam as *mut Vec<usize>);
+    if PROCESS_NAMES.contains(&exe_name(hwnd).as_str()) {
+        found.push(hwnd as usize);
+    }
+    1
+}}
+
+/// `text` with "WSJT-X" replaced by the program that is really running.
+pub fn localize(text: &str) -> String {
+    let name = app_name();
+    if name == "WSJT-X" || !text.contains("WSJT-X") {
+        return text.to_string();
+    }
+    text.replace("WSJT-X Improved", "\u{1}").replace("WSJT-X", &name).replace('\u{1}', "WSJT-X Improved")
 }
 
 fn post_key(hwnd: usize, vk: usize) {

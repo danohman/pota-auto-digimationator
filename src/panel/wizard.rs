@@ -510,7 +510,7 @@ impl Wizard {
                     "Tick Accept UDP requests in the same place. Without it WSJT-X ignores every call this program sends.".to_string(),
                     "Under Outgoing interfaces, tick the loopback adapter (and your network adapter if WSJT-X runs on another computer).".to_string(),
                     "WSJT-X Improved only: untick CQ only and Hide FT8 dupes in the Band Activity window. WSJT-X acts on a call only if it is showing that decode line, so hidden lines are ignored. If you leave CQ only on, turn off Call stations after their 73 on the hunting page.".to_string(),
-                    "On WSJT-X's main window tick Hold Tx Freq (keeps your transmit frequency where you set it) and Auto Seq. In File > Settings > General tick Disable Tx after sending 73.".to_string(),
+                    "On WSJT-X's main window tick Hold Tx Freq (keeps your transmit frequency where you set it) and Auto Seq. In File > Settings > General tick Disable Tx after sending 73. In File > Settings > Radio set the Poll Interval to 1 to 3 seconds, so WSJT-X notices band changes the app makes on the radio.".to_string(),
                     "Leave WSJT-X running and monitoring the band you want to hunt. You must be at the station: you remain the control operator.".to_string(),
                 ];
                 l.section("In WSJT-X");

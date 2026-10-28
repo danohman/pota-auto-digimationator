@@ -1181,6 +1181,7 @@ impl App {
                 self.last_wsjtx = Some(Instant::now());
                 match msg {
                     Message::Status(st) => {
+                        logdialog::refresh_app_name(&st.id);
                         self.h.handle_status(st);
                         self.update_wsjtx_status(); // show Tx changes immediately
                         self.rig_watch();
@@ -1473,6 +1474,12 @@ impl App {
         let band_now = self.h.band().unwrap_or("").to_string();
         let (a, n, d) = self.restore_wants();
         let rig = (restore && self.rig_applied && (a.is_some() || n.is_some() || d.is_some())).then(|| self.rig.clone());
+        // Fallbacks for WSJT-X builds without the band/mode buttons (WSJT-Z): the mode goes
+        // by UDP Configure, the band by tuning the rig to the mode's usual frequency.
+        let tune_rig = self.rig.clone();
+        let listener = self.listener.clone();
+        let client = self.h.status.as_ref().map(|s| s.id.clone()).unwrap_or_default();
+        let tune_mode = steps.iter().find(|s| s.0 == "mode").map_or_else(|| self.h.mode(), |s| s.1.clone());
         std::thread::Builder::new()
             .name("retune".into())
             .spawn(move || {
@@ -1484,7 +1491,18 @@ impl App {
                     if i > 0 {
                         std::thread::sleep(Duration::from_millis(1500)); // let WSJT-X finish the first change
                     }
-                    let r = if what == "mode" { wsjtx_gui::set_mode(&value) } else { wsjtx_gui::set_band(&value) };
+                    let mut r = if what == "mode" { wsjtx_gui::set_mode(&value) } else { wsjtx_gui::set_band(&value) };
+                    if r.as_deref() == Ok("notfound") {
+                        r = if what == "mode" {
+                            let sent = listener.lock().unwrap().send(&wsjtx_udp::build_configure(&client, &value));
+                            sent.map(|_| "ok".to_string())
+                        } else {
+                            match wsjtx_gui::dial_hz(&value, &tune_mode) {
+                                Some(hz) => tune_rig.tune(hz).map(|_| "ok".to_string()),
+                                None => Err(format!("no standard {tune_mode} frequency known for {value}")),
+                            }
+                        };
+                    }
                     post(Event::Retune(what, value, r.unwrap_or_else(|e| format!("error: {e}"))));
                 }
             })
@@ -2512,7 +2530,7 @@ impl App {
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
             let band = self.h.band().unwrap_or("?");
-            let text = format!("WSJT-X: {} on {} {} ({:.3} MHz)", st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
+            let text = format!("{}: {} on {} {} ({:.3} MHz)", logdialog::app_name(), st.de_call, band, st.mode, st.dial_freq as f64 / 1e6);
             info.push(StaticLine::new(self.stamp("wsjtx", &text), text));
         }
         if !self.static_rig.is_empty() {

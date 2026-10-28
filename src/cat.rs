@@ -438,6 +438,46 @@ pub fn send_verified(cfg: &Cfg, cmds: &[String]) -> Result<Vec<(String, bool)>, 
 
 
 
+/// The command that sets VFO A to `hz`: Yaesu `FA` + 9 digits, Kenwood/Elecraft `FA` + 11,
+/// CI-V `05` + 5 BCD bytes, least significant first.
+fn freq_set(rig: Rig, hz: u64) -> String {
+    if rig.civ().is_some() {
+        let d = format!("{hz:010}");
+        return format!("05{}", (0..5).rev().map(|i| &d[i * 2..i * 2 + 2]).collect::<String>());
+    }
+    if matches!(rig, Rig::Yaesu(_)) { format!("FA{hz:09};") } else { format!("FA{hz:011};") }
+}
+
+/// The last VFO A frequency in `reply`, in Hz.
+fn freq_in(rig: Rig, reply: &str) -> Option<u64> {
+    if rig.civ().is_some() {
+        let re = regex::Regex::new(r":03(\d{10});").unwrap();
+        let d = &re.captures_iter(reply).last()?[1];
+        return (0..5).rev().map(|i| &d[i * 2..i * 2 + 2]).collect::<String>().parse().ok();
+    }
+    let re = regex::Regex::new(r"FA(\d{9,11});").unwrap();
+    re.captures_iter(reply).last()?[1].parse().ok()
+}
+
+/// Tune VFO A to `hz` and read it back. Ok(true) when the radio reports it.
+pub fn set_freq(cfg: &Cfg, hz: u64) -> Result<bool, String> {
+    let mut p = open(cfg)?;
+    let rig = cfg.rig;
+    let query = if rig.civ().is_some() { "03" } else { "FA;" };
+    for _ in 0..TRIES {
+        let _ = p.clear(serialport::ClearBuffer::Input);
+        p.write_all(&wire(rig, &freq_set(rig, hz))).map_err(|e| format!("{}: {e}", cfg.port))?;
+        std::thread::sleep(Duration::from_millis(300));
+        let _ = p.clear(serialport::ClearBuffer::Input);
+        p.write_all(&wire(rig, query)).map_err(|e| format!("{}: {e}", cfg.port))?;
+        let reply = read_until(p.as_mut(), rig, |r| freq_in(rig, r) == Some(hz), ANSWER_WAIT);
+        if freq_in(rig, &reply) == Some(hz) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Ask for one setting and parse its value, skipping the rig's other chatter.
 fn read_value(p: &mut dyn serialport::SerialPort, rig: Rig, item: Item) -> Option<u32> {
     let query = read_spec(rig, item).0;
@@ -567,6 +607,17 @@ impl RigClient {
     }
 
 
+    /// Tune the radio to `hz` (blocking; call from a worker thread). WSJT-X follows the
+    /// radio's frequency, which is how a band change works when its band buttons are missing.
+    pub fn tune(&self, hz: u64) -> Result<(), String> {
+        let _g = self.lock.lock().unwrap();
+        let cfg = self.cfg.lock().unwrap().clone().ok_or("no radio COM port chosen in Settings > Radio")?;
+        match set_freq(&cfg, hz)? {
+            true => Ok(()),
+            false => Err(format!("the radio on {} did not confirm {:.3} MHz", cfg.port, hz as f64 / 1e6)),
+        }
+    }
+
     /// Run `run_test` on a worker thread (holding the rig lock so nothing else is sent
     /// meanwhile) and post `Event::CatTest` with the result.
     pub fn test(&self) {
@@ -623,6 +674,15 @@ mod tests {
     use super::*;
 
     use Rig::*;
+
+    #[test]
+    fn frequency_commands() {
+        assert_eq!(freq_set(Yaesu(100), 7_074_000), "FA007074000;");
+        assert_eq!(freq_set(Ts590(100), 14_074_000), "FA00014074000;");
+        assert_eq!(freq_set(Icom(0x94), 14_074_000), "050040071400");
+        assert_eq!(freq_in(Yaesu(100), "IF..;FA007074000;MD0C;"), Some(7_074_000));
+        assert_eq!(freq_in(Icom(0x94), ":030040071400;"), Some(14_074_000));
+    }
 
     #[test]
     fn all_off() {

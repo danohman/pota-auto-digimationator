@@ -24,6 +24,7 @@ pub const QSO_LOGGED: u32 = 5;
 pub const CLOSE: u32 = 6;
 pub const HALT_TX: u32 = 8;
 pub const FREE_TEXT: u32 = 9;
+pub const CONFIGURE: u32 = 15;
 
 /// Reply modifiers: keys "held" during the double-click. Ctrl moves Tx to the
 /// decode's frequency too, even with Hold Tx Freq checked.
@@ -353,6 +354,22 @@ pub fn build_reply(d: &Decode, modifiers: u8) -> Vec<u8> {
 
 pub fn build_halt_tx(client_id: &str, auto_only: bool) -> Vec<u8> {
     header(HALT_TX, client_id).bool(auto_only).bytes()
+}
+
+/// Configure(15) with only the mode set: empty strings and 0xFFFFFFFF mean "no change".
+/// WSJT-X switches mode the way its Mode menu does (and retunes to that mode's frequency).
+pub fn build_configure(client_id: &str, mode: &str) -> Vec<u8> {
+    header(CONFIGURE, client_id)
+        .str(mode)
+        .u32(u32::MAX) // frequency tolerance
+        .str("") // submode
+        .bool(false) // fast mode
+        .u32(u32::MAX) // T/R period
+        .u32(u32::MAX) // Rx DF
+        .str("") // DX call
+        .str("") // DX grid
+        .bool(false) // generate messages
+        .bytes()
 }
 
 /// FreeText(9): puts `text` in WSJT-X's free-text (Tx5) box; with `send` it also
