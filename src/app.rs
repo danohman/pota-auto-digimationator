@@ -2134,8 +2134,21 @@ impl App {
                         Some(s) => format!("(v{ver} {s})"),
                         None => format!("(v{ver})"),
                     };
-                    if vx + measure(&f.small, &text) <= room + tx + 2.0 {
+                    let tw = measure(&f.small, &text);
+                    if vx + tw <= room + tx + 2.0 {
                         ui::text(ui, &painter, at, &text, &f.small, p.muted);
+                        if !self.update_busy {
+                            // clicking it checks for a new version right now
+                            let r = Rect::from_min_size(at, Vec2::new(tw, f.small.m.linespace));
+                            let resp = ui.interact(r, Id::new("update-status"), egui::Sense::click());
+                            if resp.hovered() {
+                                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            }
+                            self.tips.tip(&resp, "Click to check for a new version now", 300, TipAt::Below(r));
+                            if resp.clicked() {
+                                self.check_update(true);
+                            }
+                        }
                     }
                 }
             }
