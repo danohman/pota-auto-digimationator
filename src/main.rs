@@ -115,17 +115,23 @@ fn main() -> eframe::Result {
         + toggle("Auto CQ/Answer Enabled") + 10.0 + toggle("Auto-Hunt Disabled") + 16.0 + 10.0 + 2.0 * PAD;
     let (sw, sh) = theme::screen_size();
     let (sw, sh) = (sw as f32 / scale, sh as f32 / scale);
-    let width = bars.max(log_w + right_w + 2.0 * PAD + 10.0).min(sw - 40.0);
-    let height = 760f32.min(sh - 80.0);
+    let mut width = bars.max(log_w + right_w + 2.0 * PAD + 10.0).min(sw - 40.0);
+    let mut height = 760f32.min(sh - 80.0);
+    // First run (no settings.json): only the setup wizard shows, so open a window that fits its card.
+    let first_run = !settings::data_dir(&dir).join("settings.json").exists();
+    if first_run {
+        width = 740f32.min(sw - 40.0);
+        height = 720f32.min(sh - 80.0);
+    }
     let mut vp = egui::ViewportBuilder::default()
         .with_title(TITLE)
         .with_icon(icon())
         .with_inner_size([width, height])
         .with_min_inner_size([min_width.min(width), 480.0]);
-    if let Some((w, h, x, y)) = s.window.as_deref().and_then(saved_geometry) {
+    if let Some((w, h, x, y)) = s.window.as_deref().and_then(saved_geometry).filter(|_| !first_run) {
         vp = vp.with_inner_size([(w as f32 / scale).max(min_width), (h as f32 / scale).max(480.0)]).with_position([x as f32 / scale, y as f32 / scale]);
     }
-    let options = eframe::NativeOptions { viewport: vp, centered: s.window.is_none(), ..Default::default() };
+    let options = eframe::NativeOptions { viewport: vp, centered: s.window.is_none() || first_run, ..Default::default() };
     let channel = std::sync::mpsc::channel();
     eframe::run_native(
         TITLE,
