@@ -1029,7 +1029,7 @@ impl Hunter {
             self.log(format!("Could not halt Tx: {e}"), Tag::Error);
             return;
         }
-        self.log("Tx halted", Tag::Info);
+        self.log("Tx halted", Tag::Error);
     }
 
     /// (ref, park) of the first current spot of call on band (default: ours).
@@ -1176,7 +1176,7 @@ impl Hunter {
                 if t.idle_since == 0.0 && (t.tx_started == 0.0 || now - t.tx_started < 0.6 * period) {
                     // WSJT-X ends its own Tx at the end of the period; one cut short means
                     // the operator halted it, so don't turn it back on.
-                    self.log(format!("Tx stopped early; letting go of {}", t.call), Tag::Info);
+                    self.log(format!("Tx stopped early; letting go of {}", t.call), Tag::Error);
                     self.cooloff.insert(t.call.clone(), now + Self::COOLOFF_SECONDS);
                     self.target_ = Some(t);
                     self.set_target(None);

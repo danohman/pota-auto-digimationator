@@ -242,6 +242,7 @@ fn run(me: Arc<SpotPoller>, post: Post, cache_path: PathBuf) {
                     post(Event::SpotsError(format!("Could not write spot cache: {e}")));
                 }
                 post(Event::Spots(Arc::new(SpotTable::new(&spots, fetched_at))));
+                post(Event::SpotsOk(true));
                 failures = 0;
                 me.set_next(fetched_at + POLL_INTERVAL);
             }
@@ -252,6 +253,7 @@ fn run(me: Arc<SpotPoller>, post: Post, cache_path: PathBuf) {
                     "pota.app fetch failed ({e}); using local copy, retry in {} s",
                     delay as i64
                 )));
+                post(Event::SpotsOk(false));
                 me.set_next(epoch_now() + delay);
             }
         }

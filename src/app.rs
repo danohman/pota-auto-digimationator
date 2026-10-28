@@ -229,11 +229,13 @@ struct StaticLine {
     link: bool,
     /// a button after the text: (label, enabled)
     button: Option<(&'static str, bool)>,
+    /// drawn in the error colour (a failed sign-in or fetch)
+    bad: bool,
 }
 
 impl StaticLine {
     fn new(ts: String, text: String) -> Self {
-        StaticLine { ts, text, link: false, button: None }
+        StaticLine { ts, text, link: false, button: None, bad: false }
     }
 }
 
@@ -258,13 +260,13 @@ fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32, btn
         let n = rows.len();
         for (i, text) in rows.into_iter().enumerate() {
             let last = i + 1 == n;
-            let mut row = StaticLine { ts: if i == 0 { l.ts.clone() } else { String::new() }, text, link: l.link, button: None };
+            let mut row = StaticLine { ts: if i == 0 { l.ts.clone() } else { String::new() }, text, link: l.link, button: None, bad: l.bad };
             if last {
                 match l.button {
                     Some(b) if measure(font, &row.text) + btn_w <= avail => row.button = Some(b),
                     Some(b) => {
                         out.push(row);
-                        row = StaticLine { ts: String::new(), text: String::new(), link: false, button: Some(b) };
+                        row = StaticLine { ts: String::new(), text: String::new(), link: false, button: Some(b), bad: false };
                     }
                     None => {}
                 }
@@ -294,6 +296,8 @@ pub struct App {
     pub h: Hunter,
     counts: Rc<RefCell<Option<Arc<HuntCounts>>>>,
     pub pota_status: String,
+    /// the last sign-in or hunt-count fetch failed (the Current Info line is red)
+    pota_failed: bool,
     last_wsjtx: Option<Instant>,
     t0: Instant,
     pub theme_name: &'static str,
@@ -358,7 +362,9 @@ pub struct App {
     titled_dark: Option<bool>,
     day_left: String,
     spots_text: String,
-    /// "ATT/NB/DNR off": the last rig change, shown as "[CAT: ...]" after the WSJT-X line in the log's static area.
+    /// the last pota.app spot fetch failed: the chip's dot is red until one works
+    spots_failed: bool,
+    /// "ATT/NB/NR off": the last rig change, shown as "[CAT: ...]" after the WSJT-X line in the log's static area.
     static_rig: String,
     layout_due: Option<f64>,
     last_outer: Option<Rect>,
@@ -524,6 +530,7 @@ impl App {
             h,
             counts,
             pota_status: String::new(),
+            pota_failed: false,
             last_wsjtx: None,
             t0,
             theme_name,
@@ -578,6 +585,7 @@ impl App {
             titled_dark: None,
             day_left: String::new(),
             spots_text: "Spots (pota.app): waiting for first fetch".into(),
+            spots_failed: false,
             static_rig: String::new(),
             layout_due: None,
             last_outer: None,
@@ -952,6 +960,7 @@ impl App {
         self.s.pota_password = password.to_string();
         *self.counts.borrow_mut() = None;
         self.spots_key = None;
+        self.pota_failed = false;
         self.pota_status = if !user.is_empty() && !password.is_empty() { format!("Signing in as {user}") } else { String::new() };
         if let Some(s) = &self.stats {
             s.configure(&user, password);
@@ -1069,13 +1078,16 @@ impl App {
             Event::UdpError(t) => self.log(&t, Tag::Error),
             Event::Spots(t) => self.h.set_spots(t),
             Event::SpotsError(t) => self.log(&t, Tag::Error),
+            Event::SpotsOk(ok) => self.spots_failed = !ok,
             Event::PotaStats(c) => {
+                self.pota_failed = false;
                 self.pota_status = format!("Signed in as {}: {} parks, {} activators hunted",
                                            self.s.pota_user, c.parks.len(), c.activators.len());
                 *self.counts.borrow_mut() = Some(c);
                 self.spots_key = None;
             }
             Event::PotaStatsError(t) => {
+                self.pota_failed = true;
                 self.pota_status = match t.split_once("sign-in failed") {
                     Some((_, rest)) => format!("Sign-in failed{rest}"),
                     None => t.clone(),
@@ -1958,7 +1970,7 @@ impl App {
         let dx_text = parts.join("  ·  ");
         let dx = self.chip(&dx_text, &f.ui);
         let spots_text = self.spots_text.clone();
-        let spots = self.chip(&spots_text, &f.ui).dot(Some(p.accent));
+        let spots = self.chip(&spots_text, &f.ui).dot(Some(if self.spots_failed { p.bad } else { p.accent }));
         let radio = if connected { self.radio } else { None };
         let radio_label = radio.map(|r| r.spec().0).unwrap_or("");
         let now = self.now();
@@ -2259,7 +2271,7 @@ impl App {
         } else {
             let text = self.pota_summary();
             let ts = self.stamp("pota-status", &text);
-            info.push(StaticLine::new(ts, format!("pota.app: {text}")));
+            info.push(StaticLine { bad: self.pota_failed, ..StaticLine::new(ts, format!("pota.app: {text}")) });
             if self.pota_status.starts_with("Sign-in failed") {
                 info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Check your pota.app login in Settings".into()) });
             }
@@ -2455,7 +2467,7 @@ impl App {
                 }
                 ui::text_on(ui, ui.painter(), Pos2::new(x0, my), &line.ts, &f.mono, p.log(theme::LogTag::Ts), bg);
             }
-            let color = if line.link { p.link } else { p.text };
+            let color = if line.bad { p.bad } else if line.link { p.link } else { p.text };
             let pp = ui::positions(&f.ui, &line.text);
             let chars: Vec<char> = line.text.chars().collect();
             for (from, to, selected) in [(0, s, false), (s, e, true), (e, n, false)] {

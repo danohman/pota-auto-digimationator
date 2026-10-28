@@ -15,6 +15,8 @@ pub enum Event {
     UdpError(String),
     Spots(Arc<SpotTable>),
     SpotsError(String),
+    /// whether the last pota.app spot fetch worked (colours the status dot)
+    SpotsOk(bool),
     PotaStats(Arc<HuntCounts>),
     PotaStatsError(String),
     Aclog(String, Tag),
