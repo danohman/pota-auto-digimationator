@@ -13,6 +13,8 @@ use crate::ui::{self, measure, Rnd, Scroll, TipAt, Tips};
 pub const PADX: f32 = 12.0;
 /// space after each column's widest text
 pub const COL_GAP: f32 = 18.0;
+/// width of the sort arrow after a heading
+const ARROW_W: f32 = 7.0;
 
 pub struct Col {
     pub name: &'static str,
@@ -94,10 +96,31 @@ pub struct RowData {
     pub skipped: bool,
 }
 
+/// What a row is ordered by in one column (empty values always sort last).
+#[derive(Clone, Debug, PartialEq)]
+pub enum SortKey {
+    None,
+    Num(f64),
+    Text(String),
+}
+
+impl SortKey {
+    fn cmp(&self, other: &SortKey) -> std::cmp::Ordering {
+        use std::cmp::Ordering::Equal;
+        match (self, other) {
+            (SortKey::Num(a), SortKey::Num(b)) => a.total_cmp(b),
+            (SortKey::Text(a), SortKey::Text(b)) => a.cmp(b),
+            _ => Equal,
+        }
+    }
+}
+
 pub struct Row {
     pub cells: Vec<Cell>,
     pub tags: RowTags,
     pub data: Option<RowData>,
+    /// per column (same indices as `cells`): what clicking that heading sorts by
+    pub keys: Vec<SortKey>,
 }
 
 /// Colours that change every frame (pulsing rows).
@@ -120,6 +143,8 @@ pub struct Table {
     pub scroll: Scroll,
     /// rows shown before scrolling when the window first opens
     pub height_rows: usize,
+    /// the sorted column (index) and whether it runs ascending in what the cells show
+    pub sort: (usize, bool),
 }
 
 struct Chunk {
@@ -130,7 +155,29 @@ struct Chunk {
 impl Table {
     pub fn new(id: &'static str, columns: Vec<Col>, height_rows: usize) -> Self {
         let n = columns.len();
-        Table { id, columns, hidden: vec![], widths: vec![0.0; n], need: vec![0.0; n], rows: vec![], scroll: Scroll::default(), height_rows }
+        Table { id, columns, hidden: vec![], widths: vec![0.0; n], need: vec![0.0; n], rows: vec![], scroll: Scroll::default(), height_rows, sort: (0, true) }
+    }
+
+    /// The column the rows start out sorted by, and its direction.
+    pub fn sorted_by(mut self, name: &str, ascending: bool) -> Self {
+        if let Some(i) = self.columns.iter().position(|c| c.name == name) {
+            self.sort = (i, ascending);
+        }
+        self
+    }
+
+    /// Put the rows in the sorted column's order (stable, so ties keep the order they were added in).
+    pub fn sort_rows(&mut self) {
+        let (col, asc) = self.sort;
+        self.rows.sort_by(|a, b| {
+            let (ka, kb) = (a.keys.get(col).unwrap_or(&SortKey::None), b.keys.get(col).unwrap_or(&SortKey::None));
+            match (ka, kb) {
+                (SortKey::None, SortKey::None) => std::cmp::Ordering::Equal,
+                (SortKey::None, _) => std::cmp::Ordering::Greater,
+                (_, SortKey::None) => std::cmp::Ordering::Less,
+                _ => if asc { ka.cmp(kb) } else { kb.cmp(ka) },
+            }
+        });
     }
 
     /// Size the columns to heading and sample text (before any rows are added).
@@ -257,15 +304,44 @@ impl Table {
         let stops = self.stops();
         // heading
         let head_h = Self::heading_height(f);
+        let mut clicked = None;
         for &(i, x) in &stops {
             let head = self.columns[i].heading.to_uppercase();
             let pos = Pos2::new(rect.left() + PADX + x, rect.top() + 6.0);
-            ui::text_on(ui, &painter, pos, &head, &f.table_heading, p.muted, p.surface);
-            if let Some(tip) = self.columns[i].tip {
-                let hr = Rect::from_min_size(Pos2::new(pos.x, rect.top()), Vec2::new(measure(&f.table_heading, &head), head_h));
-                let resp = ui.interact(hr, Id::unique((self.id, "head", i)), Sense::hover());
-                tips.tip(&resp, tip, 300, TipAt::Below(hr));
+            let hw = measure(&f.table_heading, &head);
+            let sorted = self.sort.0 == i;
+            // clicking a heading sorts by it; the sorted one carries an arrow after the text
+            let hr = Rect::from_min_size(Pos2::new(pos.x, rect.top()), Vec2::new(hw + if sorted { ARROW_W + 6.0 } else { 0.0 }, head_h));
+            let resp = ui.interact(hr, Id::unique((self.id, "head", i)), Sense::click());
+            let hot = resp.hovered() && ui::hover_in(ui, hr);
+            if hot {
+                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
             }
+            let color = if sorted || hot { p.text } else { p.muted };
+            ui::text_on(ui, &painter, pos, &head, &f.table_heading, color, p.surface);
+            if sorted {
+                // a small triangle: up = ascending in what the cells show
+                let (cx, cy) = (pos.x + hw + 6.0 + ARROW_W / 2.0, pos.y + f.table_heading.m.linespace / 2.0 + 1.0);
+                let (hwid, hgt) = (ARROW_W / 2.0, 3.5);
+                let pts = if self.sort.1 {
+                    vec![Pos2::new(cx - hwid, cy + hgt / 2.0), Pos2::new(cx + hwid, cy + hgt / 2.0), Pos2::new(cx, cy - hgt)]
+                } else {
+                    vec![Pos2::new(cx - hwid, cy - hgt / 2.0), Pos2::new(cx + hwid, cy - hgt / 2.0), Pos2::new(cx, cy + hgt)]
+                };
+                painter.add(egui::Shape::convex_polygon(pts, p.text, egui::Stroke::NONE));
+            }
+            let hint = match self.columns[i].tip {
+                Some(t) => format!("{t}\nClick to sort"),
+                None => "Click to sort".to_string(),
+            };
+            tips.tip(&resp, &hint, 300, TipAt::Below(hr));
+            if resp.clicked() {
+                clicked = Some(i);
+            }
+        }
+        if let Some(i) = clicked {
+            self.sort = if self.sort.0 == i { (i, !self.sort.1) } else { (i, true) };
+            self.sort_rows();
         }
         let rule_y = rect.top() + head_h;
         painter.rect_filled(Rect::from_min_size(Pos2::new(rect.left(), rule_y), Vec2::new(text_w, 1.0)), 0.0, p.border);

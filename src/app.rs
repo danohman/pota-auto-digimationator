@@ -28,7 +28,7 @@ use crate::pota_auth::{self, HuntCounts, StatsPoller};
 use crate::pota_spots::{self, epoch_now, SpotPoller};
 use crate::presence::{Phase, PresenceTimer};
 use crate::settings::{self, Settings};
-use crate::table::{Cell, Chip, Col, Icon, Lead, Row, RowColors, RowData, RowTags, Table, TableEvent};
+use crate::table::{Cell, Chip, Col, Icon, Lead, Row, RowColors, RowData, RowTags, SortKey, Table, TableEvent};
 use crate::theme::{self, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt, Tips};
 use crate::wsjtx_gui;
@@ -421,6 +421,12 @@ pub fn age_minutes(spot_time: &str, now: DateTime<Utc>) -> Option<i64> {
     Some(((now - t).num_seconds().max(0)) / 60)
 }
 
+/// A band name like "20m" or "70cm" in metres, for sorting (unknown = 0).
+fn band_meters(band: &str) -> f64 {
+    let n: f64 = band.trim_end_matches(|c: char| c.is_alphabetic()).parse().unwrap_or(0.0);
+    if band.ends_with("cm") { n / 100.0 } else if band.ends_with("mm") { n / 1000.0 } else { n }
+}
+
 /// Minutes since a pota.app spot time (UTC), e.g. "3m"; "1h05m" past an hour.
 pub fn ago(spot_time: &str, now: DateTime<Utc>) -> String {
     match age_minutes(spot_time, now) {
@@ -554,9 +560,9 @@ impl App {
             p,
             f,
             log: LogView::new(),
-            spots_tree: Table::new("spots", spots_cols, 8),
-            done_tree: Table::new("done", done_cols, 4),
-            worked_tree: Table::new("worked", worked_cols, 8),
+            spots_tree: Table::new("spots", spots_cols, 8).sorted_by("ago", true),
+            done_tree: Table::new("done", done_cols, 4).sorted_by("ago", true),
+            worked_tree: Table::new("worked", worked_cols, 8).sorted_by("time", false),
             worked_filter: String::new(),
             spots_key: None,
             spots_title: SPOTS_TITLE.into(),
@@ -1338,6 +1344,15 @@ impl App {
     }
 
     /// "12s" under a minute, else whole minutes ("3m"); "-" if never heard on this band.
+    /// Seconds since we last heard `call` on this band, for sorting the Heard column.
+    fn heard_key(&self, call: &str) -> SortKey {
+        let Some(band) = self.h.band() else { return SortKey::None };
+        match self.last_heard.get(&(base_call(call), band.to_string())) {
+            Some(t) => SortKey::Num((self.now() - t).max(0.0).floor()),
+            None => SortKey::None,
+        }
+    }
+
     fn heard_text(&self, call: &str) -> String {
         let Some(band) = self.h.band() else { return "-".into() };
         match self.last_heard.get(&(base_call(call), band.to_string())) {
@@ -1355,9 +1370,16 @@ impl App {
             .iter()
             .map(|t| t.rows.iter().map(|r| r.data.as_ref().map(|d| self.heard_text(&d.call)).unwrap_or_default()).collect())
             .collect();
+        let keys: Vec<Vec<SortKey>> = [&self.spots_tree, &self.done_tree]
+            .iter()
+            .map(|t| t.rows.iter().map(|r| r.data.as_ref().map_or(SortKey::None, |d| self.heard_key(&d.call))).collect())
+            .collect();
         let mut changed = false;
-        for (t, texts) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(texts) {
-            for (r, text) in t.rows.iter_mut().zip(texts) {
+        for ((t, texts), keys) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(texts).zip(keys) {
+            for ((r, text), key) in t.rows.iter_mut().zip(texts).zip(keys) {
+                if let Some(k) = r.keys.get_mut(1) {
+                    *k = key; // the next sort sees how long ago it is now (rows don't jump meanwhile)
+                }
                 if let Some(c) = r.cells.get_mut(1) {
                     if c.text != text {
                         c.text = text;
@@ -1755,9 +1777,21 @@ impl App {
             cells.push(park);
             debug_assert_eq!(cells.len() - 1, park_col);
             let data = RowData { call: s.activator.clone(), ref_: s.reference.clone(), status: worked.to_string(), park: s.park_name.clone(), skipped };
+            let mut keys = vec![
+                age_minutes(&s.spot_time, now).map_or(SortKey::None, |m| SortKey::Num(m as f64)),
+                self.heard_key(&s.activator),
+                SortKey::Text(s.activator.to_lowercase()),
+                SortKey::Num(s.frequency_khz),
+            ];
+            if dim {
+                keys.push(SortKey::Text(worked.to_string()));
+            }
+            keys.push(SortKey::Text(format!("{} {}", s.reference, s.park_name).trim().to_lowercase()));
             let table = if dim { &mut self.done_tree } else { &mut self.spots_tree };
-            table.add(&self.f, Row { cells, tags, data: Some(data) });
+            table.add(&self.f, Row { cells, tags, data: Some(data), keys });
         }
+        self.spots_tree.sort_rows();
+        self.done_tree.sort_rows();
         self.spots_tree.fit_columns(&self.f);
         self.done_tree.fit_columns(&self.f);
         self.spots_count = (list.len() - n_done).to_string(); // the rest are in the other card
@@ -1822,8 +1856,17 @@ impl App {
                 Cell { icon: Some(if e.logged { Icon::Ok } else { Icon::Bad }), ..Default::default() },
                 park_cell,
             ];
-            self.worked_tree.add(&self.f, Row { cells, tags: RowTags { unlogged: !e.logged, ..Default::default() }, data: None });
+            let keys = vec![
+                e.time.map_or(SortKey::None, |t| SortKey::Num(t.timestamp() as f64)),
+                SortKey::Text(e.call.to_lowercase()),
+                SortKey::Num(band_meters(&e.band)),
+                SortKey::Text(e.mode.to_lowercase()),
+                SortKey::Num(if e.logged { 1.0 } else { 0.0 }),
+                SortKey::Text(self.h.park_text(e).to_lowercase()),
+            ];
+            self.worked_tree.add(&self.f, Row { cells, tags: RowTags { unlogged: !e.logged, ..Default::default() }, data: None, keys });
         }
+        self.worked_tree.sort_rows();
         self.worked_tree.fit_columns(&self.f);
         self.worked_count = if shown == entries.len() { entries.len().to_string() } else { format!("{shown}/{}", entries.len()) };
     }
