@@ -318,6 +318,9 @@ pub struct App {
     spinner_angle: f32,
     notices: Vec<(String, String, usize, String)>,
     heard: HashMap<String, f64>,
+    /// newest spot time seen per new-parks line (band, mode), and until when each pulses
+    notice_seen: HashMap<(String, String), String>,
+    notice_pulse: HashMap<(String, String), f64>,
     /// (base call, band) -> `now()` of the last decode sent by that station
     last_heard: HashMap<(String, String), f64>,
     decode_until: f64,
@@ -531,6 +534,8 @@ impl App {
             spinner_angle: 0.0,
             notices: vec![],
             heard: HashMap::new(),
+            notice_seen: HashMap::new(),
+            notice_pulse: HashMap::new(),
             last_heard: HashMap::new(),
             decode_until: 0.0,
             radio: None,
@@ -1438,6 +1443,15 @@ impl App {
         }
         self.spots_key = Some(key);
         self.notices = if self.h.band().is_some() { self.h.new_parks_elsewhere() } else { vec![] };
+        // a line pulses when it is new, or its newest spot got newer (a lower age)
+        let until = self.now() + HEARD_SECONDS;
+        for (band, mode, _, newest) in &self.notices {
+            let key = (band.clone(), mode.clone());
+            if self.notice_seen.get(&key).is_none_or(|old| newest > old) {
+                self.notice_seen.insert(key.clone(), newest.clone());
+                self.notice_pulse.insert(key, until);
+            }
+        }
         self.spots_tree.clear();
         self.done_tree.clear();
         let (Some(spots), Some(band)) = (self.h.spots.clone(), self.h.band()) else {
@@ -2480,9 +2494,15 @@ impl App {
         let lx = inner.left() + PAD + 2.0;
         let mut top = hy + hc + 6.0;
         let mut retune = None;
+        let now = self.now();
         for (i, (band, mode, n, newest)) in self.notices.clone().into_iter().enumerate() {
             let ry = top + 1.0;
             let label = self.notice_label(n, &band, &mode, &newest);
+            if self.notice_pulse.get(&(band.clone(), mode.clone())).is_some_and(|u| *u > now) {
+                let h = rowh + 2.0 + if wraps.get(i).copied().unwrap_or(false) { rowh + 2.0 } else { 0.0 };
+                let fill = theme::mix(p.notice.0, p.notice.1, pulse(now, HEARD_PERIOD) as f32);
+                ui.painter().rect_filled(Rect::from_min_size(Pos2::new(inner.left() + 2.0, top), Vec2::new(inner.width() - 4.0, h)), 3.0, fill);
+            }
             let b = Self::qsy_button(&f, &p, "QSY");
             let sz = b.size(ui);
             let wrap = wraps.get(i).copied().unwrap_or(false);
@@ -3382,6 +3402,7 @@ impl eframe::App for App {
         }
         // keep animations and timers running
         let busy = self.radio.is_some() || self.h.target().is_some() || !self.heard.is_empty()
+            || self.notice_pulse.values().any(|u| *u > now)
             || (!self.waiting.0.is_empty() && self.waiting.1) || self.dialog.is_some()
             || self.log.buttons_mut().any(|b| b.glowing);
         ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 100 }));

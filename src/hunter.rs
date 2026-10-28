@@ -682,7 +682,7 @@ impl Hunter {
                 (b.to_string(), m, refs.len(), t)
             })
             .collect();
-        out.sort_by(|a, b| (order(&a.0), &a.1).cmp(&(order(&b.0), &b.1)));
+        out.sort_by(|a, b| b.3.cmp(&a.3).then_with(|| (order(&a.0), &a.1).cmp(&(order(&b.0), &b.1))));
         out
     }
 
