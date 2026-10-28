@@ -27,6 +27,7 @@ num-traits = "0.2"
 base64 = "0.22"
 getrandom = "0.2"
 raw-window-handle = "0.6"
+serialport = { version = "4", default-features = false }
 
 [dependencies.windows-sys]
 version = "0.61"

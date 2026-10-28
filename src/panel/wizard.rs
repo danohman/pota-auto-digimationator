@@ -43,7 +43,7 @@ const STEPS: [(Step, &str, &str); 12] = [
     (Step::Pota, "pota.app", "Your pota.app login and respotting"),
     (Step::Logging, "Logging", "WSJT-X's Log QSO window and N3FJP ACLog"),
     (Step::Sounds, "Sounds", "What you hear when a QSO is logged or a wanted park appears"),
-    (Step::Radio, "Radio", "Yaesu receiver and power settings sent through ACLog"),
+    (Step::Radio, "Radio", "Yaesu receiver and power settings sent over the COM port"),
     (Step::Review, "All set?", "Check your choices, then finish"),
 ];
 
@@ -452,7 +452,7 @@ impl Wizard {
                 bullet(l, "WSJT-X or WSJT-X Improved installed. It does not have to be running yet, but you need it to finish the connection.");
                 bullet(l, "Optional: your pota.app login, so the program can show which parks are new to you.");
                 bullet(l, "Optional: N3FJP ACLog, if you want every QSO logged there too.");
-                bullet(l, "Optional: a Yaesu FTDX101D controlled through ACLog, for the receiver and power settings.");
+                bullet(l, "Optional: a Yaesu FTDX101D controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
                 l.section("You stay in control");
                 lead(l, &format!("Amateur radio rules require a control operator at the station, so fully automatic, unattended operation is not allowed. To keep it that way the program starts with Auto-Hunt and Auto CQ/Answer switched off, asks you to confirm every time you turn one on, and asks \"Are you still there?\" every {} minutes while either is on. If you do not answer, it switches itself off.", (PRESENCE_SECONDS / 60.0) as u32));
@@ -598,7 +598,7 @@ impl Wizard {
                 self.host = h;
                 self.aport = port;
                 error_line(l, &self.error.clone());
-                help(l, "Host: 127.0.0.1 when ACLog runs on this computer. Port: ACLog's TCP API port, 1100 unless you changed it. These are also used for the Radio settings on the last pages.");
+                help(l, "Host: 127.0.0.1 when ACLog runs on this computer. Port: ACLog's TCP API port, 1100 unless you changed it.");
             }
             Step::Sounds => {
                 lead(l, "Two short sounds tell you what is happening while you are looking at another window. Each can be switched off or replaced with your own file (mp3, wav, wma or m4a).");
@@ -614,7 +614,7 @@ impl Wizard {
                 Panel::sound_file_row(l, p, Kind::Pop, &custom);
             }
             Step::Radio => {
-                lead(l, "These settings are for a Yaesu FTDX101D controlled through N3FJP ACLog: the program sends the radio CAT commands through ACLog's rig passthrough. If you have a different radio, or do not use ACLog, switch the first one off and leave the power settings on Leave, and this page does nothing.");
+                lead(l, "These settings are for a Yaesu FTDX101D: the program sends the radio CAT commands straight to its COM port and reads them back to confirm. Choose the COM port, data bits, stop bits and handshake in Settings > Radio after setup; until a port is chosen nothing is sent. If you have a different radio, switch the first one off and leave the power settings on Leave.");
                 l.section("Receiver");
                 switch(l, "Keep ATT, NB and DNR off", "Sent at start-up and after each band change", &mut app.s.rig_clean,
                        "Attenuator, noise blanker and noise reduction hurt weak-signal digital decoding, and the radio may remember them for each band. When on, the program turns all three off for the main receiver two seconds after it starts and again after every band or mode change.");
@@ -633,7 +633,7 @@ impl Wizard {
                         }
                     }
                 }
-                help(l, "ACLog cannot read the radio's settings, so the program cannot remember what they were. Instead, choose what each should be when you close the program: On, Off, or Leave (send nothing). Your usual setting is probably On.");
+                help(l, "The program does not remember what the radio was set to before it started. Choose what each should be when you close the program: On, Off, or Leave (send nothing). Your usual setting is probably On.");
                 l.section("Transmit power");
                 let (vals, labels) = stepper_labels_power();
                 let cur = app.s.rig_power.unwrap_or(0);

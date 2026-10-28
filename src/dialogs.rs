@@ -16,6 +16,8 @@ pub enum DialogKind {
     PresenceAsk,
     /// which modes were switched off, e.g. "Auto-Hunt and Auto CQ/Answer"
     PresenceExpired(String),
+    /// the Radio tab's CAT test: passed or not, and one line per item
+    CatResult(bool, Vec<String>),
 }
 
 impl DialogKind {
@@ -84,6 +86,24 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             para("As the control operator you must be present and in control of your station whenever it is transmitting. Fully automated QSOs are prohibited, so the Auto modes check from time to time that somebody is really operating.", &f.ui, p.text, 8.0),
             para("Confirm below, or Auto-Hunt and Auto CQ/Answer will be switched off when the countdown ends.", &f.ui, p.text, 8.0),
         ]),
+        DialogKind::CatResult(ok, lines) => {
+            let mut v = vec![];
+            for l in lines {
+                let bad = l.contains("FAILED") || l.contains("NOT CONFIRMED") || l.starts_with("Could not") || l.starts_with("No radio") || l.starts_with("WSJT-X is");
+                v.push(para(l, &f.ui, if bad { p.bad } else { p.text }, 6.0));
+            }
+            let (title, head, color) = if *ok {
+                ("CAT test passed", "CAT control works", p.on)
+            } else {
+                ("CAT test failed", "CAT control test failed", p.bad)
+            };
+            if *ok {
+                v.push(para("Every setting was changed, confirmed by the radio, and put back as it was.", &f.small, p.muted, 10.0));
+            } else {
+                v.push(para("Anything the test changed was put back where it could be; check the radio's ATT, NB, DNR and power.", &f.small, p.muted, 10.0));
+            }
+            (title.into(), head.into(), color, v)
+        }
         DialogKind::PresenceExpired(names) => ("Auto modes disabled".into(), format!("{names} switched off"), p.bad, vec![
             para("You did not confirm that you were at the station in time. Fully automated QSOs are prohibited, so the Auto modes are switched off whenever nobody answers.", &f.ui, p.text, 8.0),
             para("Calls already in progress in WSJT-X are left alone. You can switch the Auto modes back on yourself; that starts a fresh timer.", &f.ui, p.text, 8.0),
@@ -116,7 +136,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
             None,
             16.0 + 120.0,
         ),
-        DialogKind::PresenceExpired(_) => (
+        DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) => (
             Some(Rnd::new("OK", ui_bold).pill().pad(28.0, 8.0).colors(p.accent, p.accent_text).hover(p.accent_hover)),
             None,
             0.0,
@@ -215,7 +235,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
             }
-            DialogKind::PresenceExpired(_) => {
+            DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) => {
                 y += 16.0;
                 let b = b1.as_ref().unwrap();
                 let bs = b.size(ui);
@@ -223,7 +243,10 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
                 if b.show(ui, Id::unique("dlg-ok"), br, true).clicked() {
                     outcome = Outcome::Closed;
                 }
-                if ui.input(|i| i.viewport().close_requested()) {
+                let is_cat = matches!(kind, DialogKind::CatResult(..));
+                if is_cat && ui.input(|i| i.key_pressed(Key::Escape) || i.key_pressed(Key::Enter) || i.viewport().close_requested()) {
+                    outcome = Outcome::Closed;
+                } else if ui.input(|i| i.viewport().close_requested()) {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
             }

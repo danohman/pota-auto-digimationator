@@ -22,6 +22,8 @@ pub enum Event {
     Retune(String, String, String),
     /// result of starting our CQ through UI Automation
     CqTx(String),
+    /// result of the Radio tab's "Test CAT Control": (all passed, lines)
+    CatTest(bool, Vec<String>),
 }
 
 /// Hands an event to the UI thread (and wakes it up).

@@ -48,7 +48,7 @@ pub struct Settings {
     pub pop: bool,
     /// custom file for it; "" = the built-in pop
     pub pop_path: String,
-    /// keep ATT/NB/DNR off on the Yaesu, via ACLog's CAT passthrough
+    /// keep ATT/NB/DNR off on the Yaesu, over the COM port (cat.rs)
     pub rig_clean: bool,
     /// on close: "on", "off" or "leave" (the rig can't be read back)
     pub rig_restore_att: String,
@@ -58,6 +58,18 @@ pub struct Settings {
     pub rig_power: Option<u32>,
     /// Tx power in watts set on close; None = leave
     pub rig_power_close: Option<u32>,
+    /// radio make; only "Yaesu" for now
+    pub rig_type: String,
+    /// CAT serial port such as "COM20"; "" = not chosen
+    pub rig_com: String,
+    /// 38400 on the user's FTDX101D
+    pub rig_baud: u32,
+    /// 7 or 8
+    pub rig_data_bits: u8,
+    /// 1 or 2
+    pub rig_stop_bits: u8,
+    /// "none", "xonxoff" or "hardware"
+    pub rig_handshake: String,
     pub aclog_enabled: bool,
     pub aclog_host: String,
     pub aclog_port: u16,
@@ -112,6 +124,12 @@ impl Default for Settings {
             rig_restore_dnr: "on".into(),
             rig_power: None,
             rig_power_close: None,
+            rig_type: "Yaesu".into(),
+            rig_com: String::new(),
+            rig_baud: 38400,
+            rig_data_bits: 8,
+            rig_stop_bits: 1,
+            rig_handshake: "none".into(),
             aclog_enabled: false,
             aclog_host: "127.0.0.1".into(),
             aclog_port: 1100,
@@ -184,6 +202,15 @@ pub fn load(path: &Path) -> Settings {
         }
     }
     s.font_size = s.font_size.clamp(8, 16);
+    if !matches!(s.rig_data_bits, 7 | 8) {
+        s.rig_data_bits = 8;
+    }
+    if !matches!(s.rig_stop_bits, 1 | 2) {
+        s.rig_stop_bits = 1;
+    }
+    if !matches!(s.rig_handshake.as_str(), "none" | "xonxoff" | "hardware") {
+        s.rig_handshake = "none".into();
+    }
     // Older versions saved the stock WSJT-X log path as if it were a choice; detect.
     let old_default = adif_candidates().last().unwrap().display().to_string();
     if !s.adif_path.is_empty() && norm(&s.adif_path) == norm(&old_default) {

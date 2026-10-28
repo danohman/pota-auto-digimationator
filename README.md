@@ -155,7 +155,7 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 
 ## Radio (CAT) settings
 
-**Settings > Radio** can keep attenuator, noise blanker and noise reduction off on a Yaesu FTDX101D, by passing CAT commands through ACLog's API. This is **on by default**: it is sent at start-up and after each band or mode change. If you don't use that rig or ACLog, switch it off. On close the program can put each setting back on, off or leave it alone (the radio can't be read back, so it can't restore what it found).
+**Settings > Radio** connects the program to a Yaesu FTDX101D over its CAT serial port (the **Test CAT Control** button under Handshake briefly changes NB, NR, ATT and power, checks the radio confirms each, puts them back and shows a pass or fail box): choose the radio type, the COM port (any port Windows lists, including virtual ones), data bits (7 or 8), stop bits (1 or 2) and handshake (None, XON/XOFF or Hardware); the defaults are 8, 1 and None at 38400 baud. Nothing is sent until a COM port is chosen. With a port chosen, the program can keep attenuator, noise blanker and noise reduction off and set the transmit power, at start-up and after each band or mode change, and it reads each setting back from the radio to confirm it took (the Current Info line says which port and that it was confirmed). If you don't use that rig, switch it off. On close the program can put each setting back on, off or leave it alone.
 
 ## Making it yours
 

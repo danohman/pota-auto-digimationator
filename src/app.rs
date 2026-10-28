@@ -16,6 +16,7 @@ use chrono::{DateTime, Timelike, Utc};
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::aclog::AclogClient;
+use crate::cat::RigClient;
 use crate::cycles::{self, PeriodDetector};
 use crate::dialogs::{self, Dialog, DialogKind};
 use crate::events::{Event, Post};
@@ -288,6 +289,7 @@ pub struct App {
     poller: Option<Arc<SpotPoller>>,
     stats: Option<Arc<StatsPoller>>,
     aclog: AclogClient,
+    rig: RigClient,
     move_tx: Arc<AtomicBool>,
     pub h: Hunter,
     counts: Rc<RefCell<Option<Arc<HuntCounts>>>>,
@@ -332,6 +334,8 @@ pub struct App {
     state_ready: bool,
     rig_key: Option<(String, String)>,
     rig_applied: bool,
+    /// the Radio tab's CAT test is running
+    pub cat_testing: bool,
     timers: Vec<(f64, Timer)>,
     pub panel: Panel,
     popup: Option<PopupMenu>,
@@ -453,6 +457,14 @@ impl App {
         let poller = (!first_run).then(|| pota_spots::start_poller(post.clone(), dir.join("data").join("spots_cache.json")));
         let stats = (!first_run).then(|| pota_auth::start_stats_poller(post.clone()));
         let aclog = AclogClient::new(post.clone(), &s.aclog_host, s.aclog_port);
+        let rig = RigClient::new(post.clone());
+        rig.set_cfg((!s.rig_com.is_empty()).then(|| crate::cat::Cfg {
+            port: s.rig_com.clone(),
+            baud: s.rig_baud,
+            data_bits: s.rig_data_bits,
+            stop_bits: s.rig_stop_bits,
+            handshake: s.rig_handshake.clone(),
+        }));
         let move_tx = Arc::new(AtomicBool::new(s.move_tx));
         let t0 = Instant::now();
         let io = AppIo { listener: listener.clone(), move_tx: move_tx.clone(), post: post.clone() };
@@ -507,6 +519,7 @@ impl App {
             poller,
             stats,
             aclog,
+            rig,
             move_tx,
             h,
             counts,
@@ -546,6 +559,7 @@ impl App {
             state_ready: false,
             rig_key: None,
             rig_applied: false,
+            cat_testing: false,
             timers: vec![],
             panel: Panel::default(),
             popup: None,
@@ -668,7 +682,25 @@ impl App {
         self.timers.push((at, t));
     }
 
-    // --- Rig receive settings (Yaesu via ACLog) ----------------------------------
+    /// Settings > Radio > Test CAT Control: change and restore NB, NR, ATT and power over
+    /// the COM port and show the outcome in a dialog.
+    pub fn dialog_open(&self) -> bool {
+        self.dialog.is_some()
+    }
+
+    pub fn start_cat_test(&mut self) {
+        if self.cat_testing {
+            return;
+        }
+        if self.h.status.as_ref().is_some_and(|s| s.transmitting) {
+            self.dialog = Some(Dialog::new(DialogKind::CatResult(false, vec!["WSJT-X is transmitting; the test would change the transmit power. Try again between transmissions.".into()])));
+            return;
+        }
+        self.cat_testing = true;
+        self.rig.test();
+    }
+
+    // --- Rig receive settings (Yaesu over the COM port) ----------------------------------
 
     /// ATT, NB and DNR off on the main receiver (the radio may remember them per band).
     fn rig_clean(&mut self, quiet: bool) {
@@ -681,7 +713,7 @@ impl App {
                 (None, Some(w)) => format!("PWR {w} W"),
                 _ => "ATT/NB/DNR off".to_string(),
             };
-            self.aclog.set_rig(clean, clean, clean, power, false, &why, quiet);
+            self.rig.set_rig(clean, clean, clean, power, false, &why, quiet);
         }
     }
 
@@ -717,12 +749,12 @@ impl App {
         (w(&self.s.rig_restore_att), w(&self.s.rig_restore_nb), w(&self.s.rig_restore_dnr))
     }
 
-    /// On close, put back what the operator chose (ACLog can't read the rig's old state).
+    /// On close, put back what the operator chose (the rig's old state isn't read).
     fn rig_restore(&self, why: &str) {
         let (a, n, d) = self.restore_wants();
         let power = self.s.rig_power_close;
         if self.rig_applied && (a.is_some() || n.is_some() || d.is_some() || power.is_some()) {
-            self.aclog.set_rig(a, n, d, power, true, why, false);
+            self.rig.set_rig(a, n, d, power, true, why, false);
         }
     }
 
@@ -808,6 +840,13 @@ impl App {
         }
         self.move_tx.store(self.s.move_tx, Ordering::SeqCst);
         self.aclog.set_addr(self.s.aclog_host.trim(), self.s.aclog_port);
+        self.rig.set_cfg((!self.s.rig_com.is_empty()).then(|| crate::cat::Cfg {
+            port: self.s.rig_com.clone(),
+            baud: self.s.rig_baud,
+            data_bits: self.s.rig_data_bits,
+            stop_bits: self.s.rig_stop_bits,
+            handshake: self.s.rig_handshake.clone(),
+        }));
         self.save_settings();
     }
 
@@ -1051,6 +1090,11 @@ impl App {
                     self.log(&format!("Could not switch WSJT-X's {what} to {value} ({result}); change it in WSJT-X"), Tag::Error);
                 }
             }
+            Event::CatTest(ok, lines) => {
+                self.cat_testing = false;
+                self.log(&format!("CAT test {}", if ok { "passed" } else { "FAILED" }), if ok { Tag::Info } else { Tag::Error });
+                self.dialog = Some(Dialog::new(DialogKind::CatResult(ok, lines)));
+            }
             Event::CqTx(r) => {
                 if r == "notfound" {
                     self.log("Could not find WSJT-X's Enable Tx checkbox; turn Tx on yourself", Tag::Error);
@@ -1226,12 +1270,12 @@ impl App {
         let post = self.post.clone();
         let band_now = self.h.band().unwrap_or("").to_string();
         let (a, n, d) = self.restore_wants();
-        let rig = (restore && self.rig_applied && (a.is_some() || n.is_some() || d.is_some())).then(|| self.aclog.clone());
+        let rig = (restore && self.rig_applied && (a.is_some() || n.is_some() || d.is_some())).then(|| self.rig.clone());
         std::thread::Builder::new()
             .name("retune".into())
             .spawn(move || {
-                if let Some(aclog) = rig {
-                    aclog.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/DNR back to normal"), false);
+                if let Some(rig) = rig {
+                    rig.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/DNR back to normal"), false);
                     std::thread::sleep(Duration::from_millis(500));
                 }
                 for (i, (what, value)) in steps.into_iter().enumerate() {
@@ -3201,6 +3245,8 @@ impl App {
                 "confirm" => self.dialog = Some(Dialog::new(DialogKind::ConfirmHunt)),
                 "presence" => self.dialog = Some(Dialog::new(DialogKind::PresenceAsk)),
                 "expired" => self.dialog = Some(Dialog::new(DialogKind::PresenceExpired("Auto-Hunt".into()))),
+                "cat" => self.dialog = Some(Dialog::new(DialogKind::CatResult(true, vec!["Radio on COM20 (38400 baud, 8 data bits, 1 stop, none handshake)".into(), "NB: OK, was off, set on confirmed, restored off confirmed".into(), "PWR: OK, was 9 W, set 10 W confirmed, restored 9 W confirmed".into()]))),
+                "catfail" => self.dialog = Some(Dialog::new(DialogKind::CatResult(false, vec!["NB: OK, was off, set on confirmed, restored off confirmed".into(), "ATT: FAILED, the radio did not answer".into()]))),
                 "band" => self.retune_menu("band"),
                 "tip" => self.demo_tip = true,
                 "popup" => {

@@ -110,6 +110,12 @@ pub struct Panel {
     respot_msg: String,
     error: String,
     focus_first: bool,
+    /// the Radio tab's drop-down that is unfolded ("type" or "com"), and the COM ports
+    /// it lists (read when it was opened)
+    dd: Option<&'static str>,
+    /// a dialog window took the focus: don't close for lost focus until the main window has it back
+    held: bool,
+    ports: Vec<String>,
     /// the About tab's lines as last drawn, and the selection (line, char) anchor and focus
     about_lines: Vec<AboutLine>,
     about_sel: Option<((usize, usize), (usize, usize))>,
@@ -135,6 +141,7 @@ enum Do {
     SavePota,
     SaveRespot,
     RunWizard,
+    TestCat,
 }
 
 /// A vertical stack of rows, drawn or only measured.
@@ -425,6 +432,41 @@ impl<'a> L<'a> {
         }
     }
 
+    /// A row whose right side is a drop-down box showing `value`; true when clicked
+    /// (the caller unfolds the choices with `option_row`, inside the panel so a click on
+    /// one never counts as a click outside it).
+    fn dropdown_row(&mut self, title: &str, subtitle: &str, id: &str, value: &str, wide: &[&str]) -> bool {
+        let (p, f) = (self.p, self.f);
+        let arrow = " ▾";
+        let widest = wide.iter().chain(std::iter::once(&value)).map(|t| format!("{t}{arrow}")).max_by(|a, b| measure(&f.ui, a).total_cmp(&measure(&f.ui, b))).unwrap_or_default();
+        let shown = format!("{value}{arrow}");
+        let r = Rnd::new(&shown, &f.ui).pill().pad(12.0, 4.0).min_text(&widest).colors(p.neutral, p.neutral_text).hover(p.neutral_hover);
+        let sz = r.size(self.ui);
+        let rect = self.row(title, subtitle, sz.x + 16.0, sz.y, p.text);
+        let at = Rect::from_min_size(Pos2::new(rect.right() - sz.x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
+        self.button(&r, at, Id::unique(("dropdown", id)), true)
+    }
+
+    /// One unfolded choice of a drop-down, ticked when it is the current one.
+    fn option_row(&mut self, label: &str, selected: bool) -> bool {
+        let (p, f) = (self.p, self.f);
+        let h = f.ui.m.linespace + 2.0 * BD + 8.0;
+        let rect = Rect::from_min_size(Pos2::new(self.left, self.y), Vec2::new(self.right - self.left, h));
+        self.need(measure(&f.ui, label) + 60.0);
+        self.y += h;
+        if !self.paint {
+            return false;
+        }
+        let resp = self.ui.interact(rect, Id::unique(("option", label)), Sense::click());
+        if resp.hovered() {
+            self.painter().rect_filled(rect, ui::radius(4.0), p.select);
+            self.ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+        }
+        self.text(rect.left() + 8.0, rect.top() + 4.0 + BD, if selected { "✓" } else { "" }, &f.ui, p.accent);
+        self.text(rect.left() + 30.0, rect.top() + 4.0 + BD, label, &f.ui, p.text);
+        resp.clicked()
+    }
+
     fn small_button(&self, text: &'a str) -> Rnd<'a> {
         let p = self.p;
         Rnd::new(text, &self.f.small_bold).pill().pad(12.0, 3.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)
@@ -562,6 +604,7 @@ impl Panel {
         if self.open {
             self.open = false;
             self.demo = false;
+            self.dd = None;
             self.page = Page::Main;
             self.about_sel = None;
             self.closed_at = now;
@@ -849,7 +892,75 @@ impl Panel {
     }
 
     fn radio_tab(&mut self, app: &mut App, l: &mut L) {
-        l.section("Radio receive (Yaesu, via ACLog)");
+        l.section("Radio connection");
+        const TYPES: [&str; 1] = ["Yaesu"];
+        if l.dropdown_row("Radio type", "Which CAT command set to use", "type", &app.s.rig_type, &TYPES) {
+            self.dd = if self.dd == Some("type") { None } else { Some("type") };
+        }
+        if self.dd == Some("type") {
+            for t in TYPES {
+                if l.option_row(t, t == app.s.rig_type) {
+                    app.s.rig_type = t.to_string();
+                    self.dd = None;
+                    l.act.push(Do::Changed);
+                }
+            }
+        }
+        let com = if app.s.rig_com.is_empty() { "Choose…".to_string() } else { app.s.rig_com.clone() };
+        let sub = if !app.s.rig_com.is_empty() && !self.ports.is_empty() && !self.ports.contains(&app.s.rig_com) {
+            "Not found on this computer right now"
+        } else {
+            "The radio's CAT serial port"
+        };
+        if l.dropdown_row("COM port", sub, "com", &com, &["COM20", "Choose…"]) {
+            if self.dd == Some("com") {
+                self.dd = None;
+            } else {
+                self.ports = crate::comports::list();
+                self.dd = Some("com");
+            }
+        }
+        if self.dd == Some("com") {
+            if self.ports.is_empty() {
+                l.option_row("No COM ports found", false);
+            }
+            for port in self.ports.clone() {
+                if l.option_row(&port, port == app.s.rig_com) {
+                    app.s.rig_com = port;
+                    self.dd = None;
+                    l.act.push(Do::Changed);
+                }
+            }
+        }
+        let bits = app.s.rig_data_bits.to_string();
+        if let Some(v) = l.segmented_row("Data bits", "", "bits", &[("7", "7"), ("8", "8")], &bits) {
+            app.s.rig_data_bits = v.parse().unwrap_or(8);
+            l.act.push(Do::Changed);
+        }
+        let stop = app.s.rig_stop_bits.to_string();
+        if let Some(v) = l.segmented_row("Stop bits", "", "stop", &[("1", "1"), ("2", "2")], &stop) {
+            app.s.rig_stop_bits = v.parse().unwrap_or(1);
+            l.act.push(Do::Changed);
+        }
+        let hs = app.s.rig_handshake.clone();
+        if let Some(v) = l.segmented_row("Handshake", "", "handshake", &[("none", "None"), ("xonxoff", "XON/XOFF"), ("hardware", "Hardware")], &hs) {
+            app.s.rig_handshake = v.to_string();
+            l.act.push(Do::Changed);
+        }
+        {
+            let testing = app.cat_testing;
+            let label = if testing { "Testing…" } else { "Test CAT Control" };
+            let b = l.small_button(label);
+            let sz = b.size(l.ui);
+            let rect = l.row("Test CAT control", "Briefly changes NB, NR, ATT and power, checks the radio confirms each, and puts them back", sz.x + 16.0, sz.y, l.p.text);
+            if l.paint {
+                let r = Rect::from_min_size(Pos2::new(rect.right() - sz.x, rect.top() + ((rect.height() - sz.y) / 2.0).floor()), sz);
+                if l.button(&b, r, Id::unique("test-cat"), !testing) {
+                    l.act.push(Do::TestCat);
+                }
+            }
+        }
+        l.section("Radio receive (Yaesu, via the COM port)");
         let mut v = app.s.rig_clean;
         l.switch_row("Keep ATT, NB and DNR off", "Sent at start-up and after each band or mode change", &mut v, true, 0.0);
         app.s.rig_clean = v;
@@ -860,7 +971,7 @@ impl Panel {
                 "nb" => app.s.rig_restore_nb.clone(),
                 _ => app.s.rig_restore_dnr.clone(),
             };
-            if let Some(v) = l.segmented_row(&format!("{name} when closing"), "ACLog can't read the radio, so choose the state to leave it in", key, &choices, &cur) {
+            if let Some(v) = l.segmented_row(&format!("{name} when closing"), "Sent to the radio when the app closes; choose the state to leave it in", key, &choices, &cur) {
                 match key {
                     "att" => app.s.rig_restore_att = v.into(),
                     "nb" => app.s.rig_restore_nb = v.into(),
@@ -869,7 +980,7 @@ impl Panel {
                 l.act.push(Do::Changed);
             }
         }
-        l.section("Radio Tx power (Yaesu, via ACLog)");
+        l.section("Radio Tx power (Yaesu, via the COM port)");
         let (vals, labels) = stepper_labels_power();
         let cur = app.s.rig_power.unwrap_or(0);
         let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
@@ -1176,7 +1287,13 @@ impl Panel {
         // a click elsewhere (or another app taking focus) closes it, like losing focus
         let pressed_out = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|q| !rect.contains(q)));
         let on_gear = ctx.input(|i| i.pointer.interact_pos().is_some_and(|q| gear.contains(q)));
-        if (pressed_out && !on_gear && now - self.opened_at > 0.05) || (!ctx.input(|i| i.focused) && !self.demo) {
+        let focused = ctx.input(|i| i.focused);
+        if app.dialog_open() {
+            self.held = true;
+        } else if focused {
+            self.held = false;
+        }
+        if (pressed_out && !on_gear && now - self.opened_at > 0.05) || (!focused && !self.demo && !self.held) {
             self.close(now);
             return;
         }
@@ -1197,6 +1314,7 @@ impl Panel {
                         self.show_page(app, Page::Main);
                     }
                 },
+                Do::TestCat => app.start_cat_test(),
                 Do::RunWizard => {
                     self.close(now);
                     app.start_wizard();

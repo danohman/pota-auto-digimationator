@@ -5,6 +5,8 @@
 
 mod aclog;
 mod app;
+mod cat;
+mod comports;
 mod cycles;
 mod dialogs;
 mod events;

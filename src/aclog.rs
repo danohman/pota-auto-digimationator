@@ -75,20 +75,6 @@ pub fn parse_other_titles(response: &str) -> std::collections::HashMap<String, S
         .collect()
 }
 
-/// Yaesu FTDX101D CAT strings for the main receiver (RA = attenuator, NB, NR = DNR);
-/// each argument is Some(true) (on), Some(false) (off) or None (leave alone).
-/// `power` is the transmit power in watts (PC, three digits, 5 to 100 on the FTDX101D).
-pub fn rig_commands(att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, power: Option<u32>) -> Vec<String> {
-    let mut v: Vec<String> = [("RA0", att), ("NB0", nb), ("NR0", dnr)]
-        .iter()
-        .filter_map(|(p, s)| s.map(|on| format!("{p}{};", on as u8)))
-        .collect();
-    if let Some(w) = power {
-        v.push(format!("PC{:03};", w.clamp(5, 100)));
-    }
-    v
-}
-
 /// Sends QSOs to ACLog on worker threads; results are posted as `Event::Aclog`.
 #[derive(Clone)]
 pub struct AclogClient {
@@ -155,52 +141,6 @@ impl AclogClient {
         Ok(f)
     }
 
-    /// Send CAT commands through ACLog's SENDRIGCOMMAND on a worker thread (or right
-    /// here with wait). ACLog can't return the rig's answer, so state can't be read.
-    pub fn set_rig(&self, att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, power: Option<u32>, wait: bool, why: &str, quiet: bool) {
-        let cmds = rig_commands(att, nb, dnr, power);
-        if cmds.is_empty() {
-            return;
-        }
-        if wait {
-            self.do_set_rig(&cmds, why, quiet);
-        } else {
-            let me = self.clone();
-            let why = why.to_string();
-            std::thread::Builder::new()
-                .name("aclog-rig".into())
-                .spawn(move || me.do_set_rig(&cmds, &why, quiet))
-                .ok();
-        }
-    }
-
-    fn do_set_rig(&self, cmds: &[String], why: &str, quiet: bool) {
-        let _g = self.lock.lock().unwrap();
-        let result = (|| -> std::io::Result<()> {
-            // ACLog passes a stack of CAT commands in one SENDRIGCOMMAND (live-tested 2026-10-27)
-            self.send(&format!("<CMD><SENDRIGCOMMAND><VALUE>{}</VALUE></CMD>", cmds.concat()), false)?;
-            let items: Vec<String> = cmds
-                .iter()
-                .map(|c| {
-                    let onoff = if c[2..].starts_with("01") { "on" } else { "off" };
-                    match &c[..2] {
-                        "RA" => format!("ATT {onoff}"),
-                        "NB" => format!("NB {onoff}"),
-                        "NR" => format!("DNR {onoff}"),
-                        _ => format!("PWR {}w", c[2..].trim_end_matches(';').trim_start_matches('0')),
-                    }
-                })
-                .collect();
-            (self.post)(Event::Aclog(format!("CAT:Yaesu: {}", items.join(" / ")), Tag::Info)); // Current Info line once sent
-            Ok(())
-        })();
-        match result {
-            Ok(()) if !quiet => (self.post)(Event::Aclog(why.to_string(), Tag::Info)),
-            Ok(()) => {}
-            Err(e) => (self.post)(Event::Aclog(format!("ACLog not reachable at {}: {e}", self.where_()), Tag::Error)),
-        }
-    }
-
     pub fn log_qso(&self, q: QsoLogged, entry: WorkedEntry) {
         let me = self.clone();
         std::thread::Builder::new().name("aclog".into()).spawn(move || me.do_log_qso(&q, &entry)).ok();
@@ -233,24 +173,6 @@ impl AclogClient {
 mod tests {
     use super::*;
     use chrono::TimeZone;
-
-    #[test]
-    fn all_off() {
-        assert_eq!(rig_commands(Some(false), Some(false), Some(false), None), ["RA00;", "NB00;", "NR00;"]);
-    }
-
-    #[test]
-    fn mixed_and_leave() {
-        assert_eq!(rig_commands(Some(true), None, Some(false), None), ["RA01;", "NR00;"]);
-        assert!(rig_commands(None, None, None, None).is_empty());
-    }
-
-    #[test]
-    fn power() {
-        assert_eq!(rig_commands(None, None, None, Some(5)), ["PC005;"]);
-        assert_eq!(rig_commands(None, None, None, Some(100)), ["PC100;"]);
-        assert_eq!(rig_commands(None, None, None, Some(250)), ["PC100;"]);
-    }
 
     #[test]
     fn add_command() {
