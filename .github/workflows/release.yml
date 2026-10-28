@@ -42,6 +42,8 @@ jobs:
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           Get-FileHash "$name.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $name.zip" } | Out-File "$name.zip.sha256" -Encoding ascii
           Copy-Item target/release/pota-auto-digimationator.exe pota-auto-digimationator.exe
+          # the in-app updater checks the exe it downloads against this
+          Get-FileHash pota-auto-digimationator.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  pota-auto-digimationator.exe" } | Out-File pota-auto-digimationator.exe.sha256 -Encoding ascii
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
@@ -49,5 +51,6 @@ jobs:
           generate_release_notes: true
           files: |
             pota-auto-digimationator.exe
+            pota-auto-digimationator.exe.sha256
             pota-auto-digimationator-*.zip
             pota-auto-digimationator-*.zip.sha256

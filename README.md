@@ -180,6 +180,7 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 - **Font size**: **Settings > Appearance > Text size**, with − and + buttons. It changes the whole window at once.
 - **Pop-out**: the button at the right end of each section's header moves that section into its own window. Drag it to another monitor if you like. Click the button again (or close the window) to put it back.
 - **Rearrange**: drag a section's header to move it above or below another section, in either column. Drag the dividers to resize.
+- **Updates**: the app checks GitHub for a newer release a few seconds after start and every few hours. When there is one, a blue "Version X is available, click to update now" button appears in Current Info. Clicking it downloads the new exe, checks it, installs it and restarts the app (it won't while a QSO or Auto mode is active). Turn the check off, or run it now, under **Settings > About**.
 - Window position and size, section order, sizes and pop-out windows are all remembered.
 
 ## Safety

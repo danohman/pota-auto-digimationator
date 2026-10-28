@@ -81,7 +81,11 @@ impl Radio {
 enum Timer {
     RigClean(bool),
     CheckMode(String),
+    UpdateCheck,
 }
+
+/// how often the app looks for a newer release
+const UPDATE_EVERY: f64 = 6.0 * 3600.0;
 
 /// What the hunter does to WSJT-X and its Log QSO window.
 struct AppIo {
@@ -227,8 +231,8 @@ struct StaticLine {
     text: String,
     /// drawn as a link to the pota.app account settings
     link: bool,
-    /// a button after the text: (label, enabled)
-    button: Option<(&'static str, bool)>,
+    /// a button after the text: (label, enabled, what a click does)
+    button: Option<(String, bool, StaticClick)>,
     /// drawn in the error colour (a failed sign-in or fetch)
     bad: bool,
 }
@@ -262,8 +266,8 @@ fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32, btn
             let last = i + 1 == n;
             let mut row = StaticLine { ts: if i == 0 { l.ts.clone() } else { String::new() }, text, link: l.link, button: None, bad: l.bad };
             if last {
-                match l.button {
-                    Some(b) if measure(font, &row.text) + btn_w <= avail => row.button = Some(b),
+                match l.button.clone() {
+                    Some(b) if row.text.is_empty() || measure(font, &row.text) + btn_w <= avail => row.button = Some(b),
                     Some(b) => {
                         out.push(row);
                         row = StaticLine { ts: String::new(), text: String::new(), link: false, button: Some(b), bad: false };
@@ -277,6 +281,7 @@ fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32, btn
     out
 }
 
+#[derive(Clone, Copy)]
 enum StaticClick {
     Link,
     Refresh,
@@ -343,6 +348,14 @@ pub struct App {
     /// "Check credentials" is running / its last result (ok, text)
     pub cred_checking: bool,
     pub cred_result: Option<(bool, String)>,
+    /// a newer GitHub release than this build, shown as a chip in Current Info
+    update: Option<crate::update::Release>,
+    /// the update check or the download is running
+    update_busy: bool,
+    /// a check has worked, so "up to date" is true
+    update_ok: bool,
+    /// the last update problem (red line in Current Info) or "up to date" after a manual check: (text, bad)
+    update_note: Option<(String, bool)>,
     timers: Vec<(f64, Timer)>,
     pub panel: Panel,
     popup: Option<PopupMenu>,
@@ -573,6 +586,10 @@ impl App {
             cat_testing: false,
             cred_checking: false,
             cred_result: None,
+            update: None,
+            update_busy: false,
+            update_ok: false,
+            update_note: None,
             timers: vec![],
             panel: Panel::default(),
             popup: None,
@@ -630,7 +647,48 @@ impl App {
         let (u, pw) = (self.s.pota_user.clone(), self.s.pota_password.clone());
         self.apply_pota_login(&u, &pw, false);
         self.after(2.0, Timer::RigClean(false));
+        if self.demo.is_empty() {
+            self.after(10.0, Timer::UpdateCheck);
+        }
         self.render_worked();
+    }
+
+    /// The GitHub token for reading a private repository's releases (settings.json
+    /// `github_token`, no UI), or None.
+    fn github_token(&self) -> Option<String> {
+        self.s.extra.get("github_token").and_then(|v| v.as_str()).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)
+    }
+
+    /// Look for a newer release on a thread; `manual` = the user asked (say so when up to date).
+    pub fn check_update(&mut self, manual: bool) {
+        if self.update_busy {
+            return;
+        }
+        self.update_busy = true;
+        let (post, token) = (self.post.clone(), self.github_token());
+        std::thread::Builder::new()
+            .name("update-check".into())
+            .spawn(move || post(Event::UpdateCheck(crate::update::check(token.as_deref()), manual)))
+            .ok();
+    }
+
+    /// Download the new exe, swap it in and (the app closing) start it. Refused while a QSO is going on.
+    fn start_update(&mut self) {
+        let Some(rel) = self.update.clone() else { return };
+        if self.update_busy {
+            return;
+        }
+        if let Some(why) = self.h.retune_blocker() {
+            self.update_note = Some((format!("Can't update now: {why}"), true));
+            return;
+        }
+        self.update_busy = true;
+        self.update_note = Some((format!("Downloading version {}...", rel.version), false));
+        let (post, token) = (self.post.clone(), self.github_token());
+        std::thread::Builder::new()
+            .name("update-install".into())
+            .spawn(move || post(Event::UpdateDone(crate::update::install(&rel, token.as_deref()))))
+            .ok();
     }
 
     /// The setup wizard is done (first run): start the WSJT-X listener and the pota.app
@@ -1183,6 +1241,34 @@ impl App {
                     Ok(()) => (true, "Signed in to pota.app: these credentials work".into()),
                     Err(e) => (false, format!("Sign-in failed: {e}")),
                 });
+            }
+            Event::UpdateCheck(r, manual) => {
+                self.update_busy = false;
+                match r {
+                    Ok(Some(rel)) => {
+                        self.update_ok = true;
+                        self.update_note = None;
+                        self.update = Some(rel);
+                    }
+                    Ok(None) => {
+                        self.update_ok = true;
+                        self.update = None;
+                        self.update_note = manual.then(|| (format!("Version {} is the latest", env!("CARGO_PKG_VERSION")), false));
+                    }
+                    // a failed background check stays quiet; the user asking sees why
+                    Err(e) => self.update_note = manual.then(|| (format!("Update check failed: {e}"), true)),
+                }
+            }
+            Event::UpdateDone(r) => {
+                self.update_busy = false;
+                match r {
+                    Ok(()) => {
+                        self.update_note = Some(("Update installed, restarting...".into(), false));
+                        crate::update::request_relaunch();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                    Err(e) => self.update_note = Some((format!("Update failed: {e}"), true)),
+                }
             }
             Event::CatTest(ok, lines) => {
                 self.cat_testing = false;
@@ -1787,6 +1873,12 @@ impl App {
         for t in due {
             match t {
                 Timer::RigClean(quiet) => self.rig_clean(quiet),
+                Timer::UpdateCheck => {
+                    if self.s.update_check && self.update.is_none() {
+                        self.check_update(false);
+                    }
+                    self.after(UPDATE_EVERY, Timer::UpdateCheck);
+                }
                 Timer::CheckMode(mode) => {
                     if let Some(s) = &self.h.status {
                         if s.mode != mode {
@@ -2006,6 +2098,47 @@ impl App {
         let room = r.left() - 12.0 - (tx + 2.0);
         if measure(&f.title, TITLE) <= room {
             ui::text(ui, &painter, Pos2::new(tx + 2.0, ty + 2.0), TITLE, &f.title, p.text);
+            // the version and update state, small and in parens after the title
+            let ver = env!("CARGO_PKG_VERSION");
+            let vx = tx + 2.0 + measure(&f.title, TITLE) + 8.0;
+            let vy = ty + 2.0 + f.title.m.linespace - f.small.m.linespace - 1.0;
+            let at = Pos2::new(vx, vy);
+            let new = self.update.as_ref().map(|u| u.version.clone());
+            let status = match (&new, self.update_busy, self.update_ok) {
+                (Some(_), true, _) => Some("downloading..."),
+                (None, true, _) => Some("checking..."),
+                (None, false, true) => Some("up to date"),
+                _ => None,
+            };
+            match (new.filter(|_| !self.update_busy), status) {
+                (Some(v), _) => {
+                    let head = format!("(v{ver} ");
+                    let hw = measure(&f.small, &head);
+                    let label = format!("Update now to v{v}");
+                    let chip = Rnd::new(&label, &f.small_bold).pill().pad(8.0, 1.0).colors(p.blue, p.blue_text).hover(p.blue_hover);
+                    let sz = chip.size(ui);
+                    let tail_w = measure(&f.small, ")");
+                    if vx + hw + sz.x + 2.0 + tail_w <= room + tx + 2.0 {
+                        ui::text(ui, &painter, at, &head, &f.small, p.muted);
+                        let r = Rect::from_min_size(Pos2::new(vx + hw, vy + ((f.small.m.linespace - sz.y) / 2.0).floor()), sz);
+                        let resp = chip.show(ui, Id::new("update-chip"), r, true);
+                        self.tips.tip(&resp, "Download the new version, install it and restart the app", 300, TipAt::Below(r));
+                        ui::text(ui, &painter, Pos2::new(r.right() + 2.0, vy), ")", &f.small, p.muted);
+                        if resp.clicked() {
+                            self.start_update();
+                        }
+                    }
+                }
+                (None, s) => {
+                    let text = match s {
+                        Some(s) => format!("(v{ver} {s})"),
+                        None => format!("(v{ver})"),
+                    };
+                    if vx + measure(&f.small, &text) <= room + tx + 2.0 {
+                        ui::text(ui, &painter, at, &text, &f.small, p.muted);
+                    }
+                }
+            }
             let sub = "Calls Parks on the Air activators through WSJT-X";
             if measure(&f.small, sub) <= room {
                 ui::text(ui, &painter, Pos2::new(tx + 2.0, ty + f.title.m.linespace + 4.0 + 2.0), sub, &f.small, p.muted);
@@ -2358,6 +2491,10 @@ impl App {
                 info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Check your pota.app login in Settings".into()) });
             }
         }
+        let avail = (card_w - 2.0 - PAD - (PAD + 2.0 + 10.0 * measure(&f.mono, "0"))).max(60.0);
+        if let Some((text, bad)) = self.update_note.clone() {
+            info.push(StaticLine { bad, ..StaticLine::new(self.stamp("update-note", &text), text) });
+        }
         // oldest first, like the log; a line with no stamp belongs to the stamped one above it
         let mut groups: Vec<Vec<StaticLine>> = vec![];
         for l in info {
@@ -2369,9 +2506,12 @@ impl App {
         groups.sort_by(|a, b| a[0].ts.cmp(&b[0].ts));
         let info: Vec<StaticLine> = groups.into_iter().flatten().collect();
         // wrap to the card's width (a narrow window): the text starts after the 10-column stamp
-        let avail = (card_w - 2.0 - PAD - (PAD + 2.0 + 10.0 * measure(&f.mono, "0"))).max(60.0);
-        let btn_w = Rnd::new("Refresh now", &f.small_bold).pill().pad(9.0, 1.0).size(ui).x + 10.0;
-                wrap_static(info, &f.ui, avail, btn_w)
+        let btn_w = info
+            .iter()
+            .filter_map(|l| l.button.as_ref())
+            .map(|b| Rnd::new(&b.0, &f.small_bold).pill().pad(9.0, 1.0).size(ui).x + 10.0)
+            .fold(0.0, f32::max);
+        wrap_static(info, &f.ui, avail, btn_w)
     }
 
     fn info_row_h(&self, ui: &Ui, info: &[StaticLine]) -> f32 {
@@ -2449,7 +2589,6 @@ impl App {
         }
         let cw = measure(&f.mono, "0");
         let xt = x0 + 10.0 * cw; // text starts after "HH:MM:SS  "
-        let btn_of = |label: &'static str| Rnd::new(label, &f.small_bold).pill().pad(9.0, 1.0).colors(p.blue, p.blue_text).hover(p.blue_hover);
         let lh = self.info_row_h(ui, info);
         let area = Rect::from_min_max(Pos2::new(inner.left(), y0), Pos2::new(inner.right(), y0 + lh * info.len() as f32));
         let hit = |pos: Pos2| -> (usize, usize) {
@@ -2565,19 +2704,21 @@ impl App {
                 let seg: String = chars[from..to].iter().collect();
                 ui::text_on(ui, ui.painter(), Pos2::new(px, ty), &seg, &f.ui, color, bg);
             }
-            if let Some((label, enabled)) = line.button {
-                let mut b = btn_of(label);
-                if !enabled {
-                    b = Rnd::new(label, &f.small_bold).pill().pad(9.0, 1.0).colors(p.disabled_btn.0, p.disabled_btn.1);
-                }
+            if let Some((label, enabled, what)) = &line.button {
+                let enabled = *enabled;
+                let b = Rnd::new(label, &f.small_bold).pill().pad(9.0, 1.0);
+                let b = if enabled { b.colors(p.blue, p.blue_text).hover(p.blue_hover) } else { b.colors(p.disabled_btn.0, p.disabled_btn.1) };
                 let sz = b.size(ui);
                 let after = if line.text.is_empty() { 0.0 } else { measure(&f.ui, &line.text) + 10.0 };
                 let r = Rect::from_min_size(Pos2::new(xt + after, y + ((lh - sz.y) / 2.0).floor()), sz);
-                let resp = b.show(ui, Id::new("static-refresh"), r, enabled);
-                let tip = if enabled { "Fetch your hunt counts from pota.app again now" } else { "Counts were fetched less than a minute ago" };
+                let resp = b.show(ui, Id::new(("static-button", label.as_str())), r, enabled);
+                let tip = match (what, enabled) {
+                    (_, true) => "Fetch your hunt counts from pota.app again now",
+                    (_, false) => "Counts were fetched less than a minute ago",
+                };
                 self.tips.tip(&resp, tip, 300, TipAt::Below(r));
                 if enabled && resp.clicked() {
-                    click = Some(StaticClick::Refresh);
+                    click = Some(*what);
                 }
             }
         }
@@ -3327,6 +3468,10 @@ impl App {
                     *self.counts.borrow_mut() = Some(Arc::new(c));
                     self.spots_key = None;
                     self.refresh_spots_list();
+                }
+                "update" => {
+                    let a = |n: &str| crate::update::Asset { name: n.into(), api_url: String::new(), browser_url: String::new() };
+                    self.update = Some(crate::update::Release { version: "9.9.9".into(), page: String::new(), exe: a("pota-auto-digimationator.exe"), exe_sha: None });
                 }
                 "hunt" => self.set_hunting(true),
                 "cq" => self.set_cq(true),

@@ -26,6 +26,7 @@ mod table;
 mod textsel;
 mod theme;
 mod ui;
+mod update;
 mod wsjtx_gui;
 mod wsjtx_udp;
 
@@ -85,6 +86,7 @@ fn saved_geometry(s: &str) -> Option<(i32, i32, i32, i32)> {
 }
 
 fn main() -> eframe::Result {
+    update::cleanup();
     let dir = app_dir();
     let s = settings::load(&settings::data_dir(&dir).join("settings.json"));
     let (fonts, defs) = Fonts::load(s.font_size as f32);
@@ -134,9 +136,11 @@ fn main() -> eframe::Result {
     }
     let options = eframe::NativeOptions { viewport: vp, centered: s.window.is_none() || first_run, ..Default::default() };
     let channel = std::sync::mpsc::channel();
-    eframe::run_native(
+    let result = eframe::run_native(
         TITLE,
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, dir, (fonts, defs), channel, right_w)))),
-    )
+    );
+    update::relaunch_if_requested(); // after an update: the app has shut down, start the new exe
+    result
 }

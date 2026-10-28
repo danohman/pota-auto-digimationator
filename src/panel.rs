@@ -119,6 +119,7 @@ pub struct Panel {
 
 /// What a click in the panel asks for.
 enum Do {
+    CheckUpdate,
     Tab(Tab),
     Page(Page),
     Close,
@@ -743,6 +744,19 @@ impl Panel {
         l.y += 6.0;
         self.about_text(l, "POTA Auto-Digimationator", AFont::UiBold, wrap, 0.0, 0.0, None);
         self.about_text(l, &format!("Version {}", env!("CARGO_PKG_VERSION")), AFont::SmallMuted, wrap, 0.0, 0.0, None);
+        l.section("Updates");
+        let mut v = app.s.update_check;
+        l.switch_row("Check for updates", "Looks at GitHub's latest release every few hours and offers it in Current Info", &mut v, true, 0.0);
+        app.s.update_check = v;
+        let btn = l.small_button("Check now");
+        let bsz = btn.size(l.ui);
+        let rect = l.row("Check now", "Look for a newer version right away", bsz.x + 16.0, bsz.y, l.p.text);
+        if l.paint {
+            let r = Rect::from_min_size(Pos2::new(rect.right() - bsz.x, rect.top() + ((rect.height() - bsz.y) / 2.0).floor()), bsz);
+            if l.button(&btn, r, Id::unique("check-update"), true) {
+                l.act.push(Do::CheckUpdate);
+            }
+        }
         l.section("Copyright");
         let year = chrono::Local::now().year();
         let years = if year > FIRST_YEAR { format!("{FIRST_YEAR}-{year}") } else { FIRST_YEAR.to_string() };
@@ -1470,6 +1484,7 @@ impl Panel {
                     }
                 },
                 Do::TestCat => app.start_cat_test(),
+                Do::CheckUpdate => app.check_update(true),
                 Do::RunWizard => {
                     self.close(now);
                     app.start_wizard();

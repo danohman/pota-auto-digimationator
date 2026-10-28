@@ -28,6 +28,11 @@ pub enum Event {
     CatTest(bool, Vec<String>),
     /// result of "Check credentials" on a pota.app sign-in page: Ok, or why it failed
     PotaCheck(Result<(), String>),
+    /// result of the update check: a newer release, none, or why it failed; the bool is
+    /// true when the user asked for the check (so "up to date" is worth saying)
+    UpdateCheck(Result<Option<crate::update::Release>, String>, bool),
+    /// result of downloading and installing the update
+    UpdateDone(Result<(), String>),
 }
 
 /// Hands an event to the UI thread (and wakes it up).

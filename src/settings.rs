@@ -104,6 +104,8 @@ pub struct Settings {
     pub pota_password: String,
     /// respot the activator to pota.app after each logged QSO
     pub respot: bool,
+    /// look for a newer release on GitHub now and then
+    pub update_check: bool,
     /// respot comment template; "" = no comment (default "{MODE}: S:{RST_SENT} / R:{RST_RCVD}") (see respot::PLACEHOLDERS)
     pub respot_message: String,
     /// "system" (follow Windows), "light" or "dark"
@@ -163,6 +165,7 @@ impl Default for Settings {
             pota_user: String::new(),
             pota_password: String::new(),
             respot: true,
+            update_check: true,
             respot_message: "{MODE}: S:{RST_SENT} / R:{RST_RCVD}".into(),
             theme: "system".into(),
             font_size: 10,
