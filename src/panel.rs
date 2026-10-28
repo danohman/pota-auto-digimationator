@@ -81,17 +81,10 @@ pub const TABS: [(Tab, &str); 6] = [
 pub enum Page {
     #[default]
     Main,
-    Aclog,
     Wsjtx,
     Pota,
     Respot,
 }
-
-/// Loggers a QSO can also be sent to: (key, name, one-line description, implemented).
-pub const LOGGERS: [(&str, &str, &str, bool); 2] = [
-    ("aclog", "ACLog", "N3FJP ACLog over its TCP API", true),
-    ("ham2k", "Ham2K Power Logger", "Not available yet", false),
-];
 
 #[derive(Default)]
 pub struct Panel {
@@ -103,8 +96,9 @@ pub struct Panel {
     // edit buffers for the sub-pages
     group: String,
     port: String,
-    host: String,
-    aport: String,
+    /// the logger chosen in the Logging tab drop-down and the host/port text of every logger
+    lg_sel: usize,
+    lg_bufs: Vec<(String, String)>,
     user: String,
     pass: String,
     respot_msg: String,
@@ -137,11 +131,11 @@ enum Do {
     ResetSound(Kind),
     ApplyUdp,
     ResetUdp,
-    SaveAclog,
     SavePota,
     SaveRespot,
     RunWizard,
     TestCat,
+    CheckPota,
 }
 
 /// A vertical stack of rows, drawn or only measured.
@@ -641,6 +635,7 @@ impl Panel {
         if self.open {
             self.open = false;
             self.demo = false;
+            self.lg_bufs.clear();
             self.dd = None;
             self.page = Page::Main;
             self.about_sel = None;
@@ -673,10 +668,6 @@ impl Panel {
             Page::Wsjtx => {
                 self.group = app.s.udp_group.clone();
                 self.port = app.s.udp_port.to_string();
-            }
-            Page::Aclog => {
-                self.host = app.s.aclog_host.clone();
-                self.aport = app.s.aclog_port.to_string();
             }
             Page::Pota => {
                 self.user = app.s.pota_user.clone();
@@ -735,7 +726,6 @@ impl Panel {
                 }
             }
             Page::Wsjtx => self.wsjtx_page(app, &mut l),
-            Page::Aclog => self.aclog_page(&mut l),
             Page::Pota => self.pota_page(app, &mut l),
             Page::Respot => self.respot_page(&mut l),
         }
@@ -1162,31 +1152,93 @@ impl Panel {
         Self::sound_file_row(l, p, Kind::Pop, &custom);
 
         l.section("Also log each QSO to");
-        for (key, name, blurb, ready) in LOGGERS {
-            if key == "aclog" {
-                let host = format!("{}:{}", app.s.aclog_host, app.s.aclog_port);
-                let edit = l.small_button("Edit");
-                let esz = edit.size(l.ui);
-                let mut v = app.s.aclog_enabled;
-                let (rect, _) = l.switch_row(name, &format!("{blurb}  ·  {host}"), &mut v, true, esz.x + 12.0);
-                app.s.aclog_enabled = v;
-                if l.paint {
-                    let r = Rect::from_min_size(Pos2::new(rect.right() - 40.0 - 16.0 - 12.0 - esz.x, rect.top() + ((rect.height() - esz.y) / 2.0).floor()), esz);
-                    if l.button(&edit, r, Id::unique("aclog-edit"), true) {
-                        l.act.push(Do::Page(Page::Aclog));
-                    }
+        let (mut dd, mut sel, mut bufs) = (self.dd, self.lg_sel, std::mem::take(&mut self.lg_bufs));
+        Self::logger_picker(l, app, &mut dd, &mut sel, &mut bufs);
+        (self.dd, self.lg_sel, self.lg_bufs) = (dd, sel, bufs);
+
+        let mut v = false;
+        let soon = Rnd::new("Coming soon", &f.small_bold).pill().pad(10.0, 2.0).colors(p.surface2, p.muted);
+        let ssz = soon.size(l.ui);
+        let (rect, _) = l.switch_row("Ham2K Power Logger", "Not available yet", &mut v, false, ssz.x + 12.0);
+        if l.paint {
+            let r = Rect::from_min_size(Pos2::new(rect.right() - 40.0 - 16.0 - 12.0 - ssz.x, rect.top() + ((rect.height() - ssz.y) / 2.0).floor()), ssz);
+            soon.paint(l.ui, &l.painter(), r, false);
+        }
+    }
+
+    /// The logger program drop-down with, for the chosen one, its switch, the host and port
+    /// it needs and how to set it up. Shared by Settings > Logging and the setup wizard.
+    /// Entry 0 is ACLog, the rest are `loggers::KINDS`; `bufs` holds the host and port text.
+    fn logger_picker(l: &mut L, app: &mut App, dd: &mut Option<&'static str>, sel: &mut usize, bufs: &mut Vec<(String, String)>) {
+        use crate::loggers::KINDS;
+        let (p, f) = (l.p, l.f);
+        let count = KINDS.len() + 1;
+        if bufs.len() != count {
+            *bufs = std::iter::once((app.s.aclog_host.clone(), app.s.aclog_port.to_string()))
+                .chain(KINDS.iter().map(|k| { let c = app.s.logger(*k); (c.host, c.port.to_string()) }))
+                .collect();
+        }
+        *sel = (*sel).min(count - 1);
+        let name = |i: usize| if i == 0 { "ACLog" } else { KINDS[i - 1].name() };
+        let enabled = |app: &App, i: usize| if i == 0 { app.s.aclog_enabled } else { app.s.logger(KINDS[i - 1]).enabled };
+        let labels: Vec<String> = (0..count).map(|i| if enabled(app, i) { format!("{} (on)", name(i)) } else { name(i).to_string() }).collect();
+        let wide: Vec<&str> = labels.iter().map(String::as_str).collect();
+        if l.dropdown_row("Logger program", "Pick one to see what it needs", "logger", &labels[*sel], &wide) {
+            *dd = if *dd == Some("logger") { None } else { Some("logger") };
+        }
+        if *dd == Some("logger") {
+            match l.dropdown_list("logger", &labels, Some(*sel)) {
+                Some(Some(i)) => {
+                    *sel = i;
+                    *dd = None;
                 }
-            } else {
-                let mut v = false;
-                let soon = Rnd::new("Coming soon", &f.small_bold).pill().pad(10.0, 2.0).colors(p.surface2, p.muted);
-                let ssz = soon.size(l.ui);
-                let (rect, _) = l.switch_row(name, blurb, &mut v, ready, ssz.x + 12.0);
-                if l.paint && !ready {
-                    let r = Rect::from_min_size(Pos2::new(rect.right() - 40.0 - 16.0 - 12.0 - ssz.x, rect.top() + ((rect.height() - ssz.y) / 2.0).floor()), ssz);
-                    soon.paint(l.ui, &l.painter(), r, false);
-                }
+                Some(None) => *dd = None,
+                None => {}
             }
         }
+        let i = *sel;
+        let mut on = enabled(app, i);
+        l.switch_row(&format!("Log each QSO to {}", name(i)), "Off by default", &mut on, true, 0.0);
+        let (mut h, mut port) = bufs[i].clone();
+        l.form(&mut [("Host", &mut h, 24.0, false), ("Port", &mut port, 8.0, false)], 6.0, false);
+        bufs[i] = (h.clone(), port.clone());
+        let mut changed = on != enabled(app, i);
+        let valid = port.trim().parse::<u16>().ok().filter(|n| *n >= 1).filter(|_| !h.trim().is_empty());
+        if i == 0 {
+            app.s.aclog_enabled = on;
+            if let Some(n) = valid {
+                changed |= app.s.aclog_host != h.trim() || app.s.aclog_port != n;
+                app.s.aclog_host = h.trim().to_string();
+                app.s.aclog_port = n;
+            }
+        } else {
+            let kind = KINDS[i - 1];
+            let mut c = app.s.logger(kind);
+            c.enabled = on;
+            if let Some(n) = valid {
+                c.host = h.trim().to_string();
+                c.port = n;
+            }
+            if app.s.logger(kind) != c {
+                app.s.set_logger(kind, c);
+                changed = true;
+            }
+        }
+        if changed && l.paint {
+            l.act.push(Do::Changed);
+        }
+        let w = l.right - l.left - 2.0;
+        if valid.is_none() {
+            let e = if h.trim().is_empty() { "Enter the host (127.0.0.1 for this computer)" } else { "Port must be a number from 1 to 65535" };
+            l.text(l.left + 1.0, l.y + 1.0, e, &f.small, p.bad);
+            l.y += f.small.m.linespace + 2.0;
+        }
+        let help = if i == 0 {
+            "In ACLog, turn on Settings > Application Program Interface > TCP API and use the port shown there (usually 1100). Each QSO is sent with the park reference.".to_string()
+        } else {
+            KINDS[i - 1].help().to_string()
+        };
+        l.paragraph(&format!("{help} Leave this off if {} already receives your QSOs straight from WSJT-X, or you would get every contact twice.", name(i)), &f.small, p.muted, w, 0.0, 8.0);
     }
 
     /// Where to listen for WSJT-X, and what to set up in WSJT-X so it works.
@@ -1249,29 +1301,23 @@ impl Panel {
         }
     }
 
-    /// ACLog's host and port, edited in place.
-    fn aclog_page(&mut self, l: &mut L) {
+    /// "Check credentials" button with the result of the last check beside it.
+    fn check_creds_row(l: &mut L, app: &App) {
         let (p, f) = (l.p, l.f);
-        l.header("ACLog connection", true);
-        l.y += 8.0;
-        let focus = self.focus_first && l.paint;
+        let checking = app.cred_checking;
+        let b = l.small_button(if checking { "Checking…" } else { "Check credentials" });
+        let sz = b.size(l.ui);
+        l.y += 6.0;
         if l.paint {
-            self.focus_first = false;
+            let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
+            if l.button(&b, r, Id::new("check-creds"), !checking) {
+                l.act.push(Do::CheckPota);
+            }
+            if let Some((ok, text)) = &app.cred_result {
+                l.text(l.left + sz.x + 10.0, l.y + ((sz.y - f.small.m.linespace) / 2.0).floor(), text, &f.small, if *ok { p.ok } else { p.bad });
+            }
         }
-        let (mut h, mut port) = (self.host.clone(), self.aport.clone());
-        l.form(&mut [("Host", &mut h, 24.0, false), ("Port", &mut port, 8.0, false)], 6.0, focus);
-        self.host = h;
-        self.aport = port;
-        l.paragraph("In ACLog, turn on Settings > Application Program Interface > TCP API and use the port shown there (usually 1100).",
-                    &f.small, p.muted, WIDTH - 40.0, 8.0, 4.0);
-        let e = self.error.clone();
-        l.text(l.left + 1.0, l.y + 1.0, &e, &f.small, p.bad);
-        l.y += f.small.m.linespace + 2.0;
-        match l.buttons_right(&[("Save", true, "Cancel"), ("Cancel", false, "Cancel")], 10.0).as_deref() {
-            Some("Save") => l.act.push(Do::SaveAclog),
-            Some("Cancel") => l.act.push(Do::Back),
-            _ => {}
-        }
+        l.y += sz.y + 6.0;
     }
 
     /// pota.app username and password, for the hunt counts.
@@ -1289,6 +1335,7 @@ impl Panel {
         self.pass = pw;
         l.paragraph("The username or email you sign in with at pota.app. Used only to read your hunt counts, so spots show \"new to me\" parks and how often you've worked each activator. The password is stored in settings.json on this computer.",
                     &f.small, p.muted, WIDTH - 40.0, 8.0, 4.0);
+        Self::check_creds_row(l, app);
         let status = app.pota_status.clone();
         let c = if status.starts_with("Sign-in failed") { p.bad } else { p.muted };
         l.paragraph(&status, &f.small, c, WIDTH - 40.0, 0.0, 0.0);
@@ -1386,7 +1433,6 @@ impl Panel {
         }
         if enter {
             match self.page {
-                Page::Aclog => acts.push(Do::SaveAclog),
                 Page::Pota => acts.push(Do::SavePota),
                 Page::Respot => acts.push(Do::SaveRespot),
                 Page::Wsjtx => acts.push(Do::ApplyUdp),
@@ -1418,7 +1464,6 @@ impl Panel {
                 Do::Close => self.close(now),
                 Do::Back => match self.page {
                     Page::Main => self.close(now),
-                    Page::Aclog => self.show_page(app, Page::Main),
                     _ => {
                         self.tab = Tab::Connect;
                         self.show_page(app, Page::Main);
@@ -1454,7 +1499,7 @@ impl Panel {
                     app.settings_changed();
                 }
                 Do::ResetUdp => {
-                    self.group = "224.0.0.2".into();
+                    self.group = "224.0.0.1".into();
                     self.port = "2237".into();
                 }
                 Do::ApplyUdp => {
@@ -1467,26 +1512,15 @@ impl Panel {
                         }
                     };
                     if addr.parse::<std::net::Ipv4Addr>().is_err() || addr.matches('.').count() != 3 {
-                        self.error = "Address must look like 224.0.0.2 (or 127.0.0.1)".into();
+                        self.error = "Address must look like 224.0.0.1 (or 127.0.0.1)".into();
                         continue;
                     }
                     app.apply_udp(&addr, port);
                     self.show_page(app, Page::Wsjtx);
                 }
-                Do::SaveAclog => {
-                    let port = match self.aport.trim().parse::<u16>() {
-                        Ok(n) if n >= 1 => n,
-                        _ => {
-                            self.error = "Port must be a number from 1 to 65535".into();
-                            continue;
-                        }
-                    };
-                    let host = self.host.trim();
-                    app.s.aclog_host = if host.is_empty() { "127.0.0.1".into() } else { host.to_string() };
-                    app.s.aclog_port = port;
-                    app.settings_changed();
-                    self.tab = Tab::Logging;
-                    self.show_page(app, Page::Main);
+                Do::CheckPota => {
+                    let (u, pw) = (self.user.clone(), self.pass.clone());
+                    app.check_pota(&u, &pw);
                 }
                 Do::SavePota => {
                     let (u, pw) = (self.user.clone(), self.pass.clone());

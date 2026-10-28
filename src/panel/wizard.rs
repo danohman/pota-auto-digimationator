@@ -40,10 +40,10 @@ const STEPS: [(Step, &str, &str); 13] = [
     (Step::Link, "Connect to WSJT-X", "The address and port this program listens on"),
     (Step::WsjtxSetup, "Set up WSJT-X", "Options to switch on inside WSJT-X itself"),
     (Step::Safety, "Hunting: safety limits", "Dry run, how persistent to be, and how weak is too weak"),
-    (Step::Hunting, "Hunting: behaviour", "Which stations to call and where your transmit frequency goes"),
+    (Step::Hunting, "Hunting: behavior", "Which stations to call and where your transmit frequency goes"),
     (Step::Cq, "Auto CQ/Answer", "The CQ message used when you let the program call CQ"),
     (Step::Pota, "pota.app", "Your pota.app login and respotting"),
-    (Step::Logging, "Logging", "WSJT-X's Log QSO window and N3FJP ACLog"),
+    (Step::Logging, "Logging", "WSJT-X's Log QSO window and other loggers"),
     (Step::Sounds, "Sounds", "What you hear when a QSO is logged or a wanted park appears"),
     (Step::RadioConn, "Radio connection", "Which radio you have and the serial port it is on"),
     (Step::Radio, "Radio", "Yaesu, Kenwood, Elecraft, Icom or Xiegu receiver and power settings sent over the COM port"),
@@ -70,8 +70,9 @@ pub struct Wizard {
     // edit buffers, copied into the settings when their page is left
     group: String,
     port: String,
-    host: String,
-    aport: String,
+    /// the logger picked in the Logging page drop-down, and every logger.s host and port text (see Panel::logger_picker)
+    lg_sel: usize,
+    lg_bufs: Vec<(String, String)>,
     user: String,
     pass: String,
     msg: String,
@@ -126,8 +127,8 @@ impl Wizard {
             orig: rerun.then(|| s.clone()),
             group: s.udp_group.clone(),
             port: s.udp_port.to_string(),
-            host: s.aclog_host.clone(),
-            aport: s.aclog_port.to_string(),
+            lg_sel: 0,
+            lg_bufs: vec![],
             user: s.pota_user.clone(),
             pass: s.pota_password.clone(),
             msg: s.respot_message.clone(),
@@ -163,19 +164,10 @@ impl Wizard {
                     _ => return Err("Port must be a number from 1 to 65535".into()),
                 };
                 if addr.parse::<std::net::Ipv4Addr>().is_err() || addr.matches('.').count() != 3 {
-                    return Err("Address must look like 224.0.0.2 (or 127.0.0.1)".into());
+                    return Err("Address must look like 224.0.0.1 (or 127.0.0.1)".into());
                 }
                 app.s.udp_group = addr;
                 app.s.udp_port = port;
-            }
-            Step::Logging => {
-                let port = match self.aport.trim().parse::<u16>() {
-                    Ok(n) if n >= 1 => n,
-                    _ => return Err("Port must be a number from 1 to 65535".into()),
-                };
-                let host = self.host.trim();
-                app.s.aclog_host = if host.is_empty() { "127.0.0.1".into() } else { host.to_string() };
-                app.s.aclog_port = port;
             }
             Step::Pota => {
                 app.s.pota_user = self.user.trim().to_string();
@@ -337,6 +329,10 @@ impl Wizard {
                     Kind::Pop => app.s.pop_path.clear(),
                 },
                 Do::TestCat => app.start_cat_test(),
+                Do::CheckPota => {
+                    let (u, pw) = (self.user.clone(), self.pass.clone());
+                    app.check_pota(&u, &pw);
+                }
                 Do::Page(_) | Do::Close | Do::Back | Do::Changed | Do::Tab(_) => {}
                 _ => {}
             }
@@ -462,7 +458,7 @@ impl Wizard {
                 l.section("Before you start");
                 bullet(l, "WSJT-X or WSJT-X Improved installed. It does not have to be running yet, but you need it to finish the connection.");
                 bullet(l, "Optional: your pota.app login, so the program can show which parks are new to you.");
-                bullet(l, "Optional: N3FJP ACLog, if you want every QSO logged there too.");
+                bullet(l, "Optional: N3FJP ACLog, Log4OM, DXKeeper, HRD Logbook or N1MM Logger+, if you want every QSO logged there too.");
                 bullet(l, "Optional: a Yaesu FTDX101D, Kenwood TS-590S/SG/TS-890S Elecraft, Icom or Xiegu radio controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
                 l.section("You stay in control");
@@ -497,12 +493,12 @@ impl Wizard {
                 self.port = port;
                 error_line(l, &self.error.clone());
                 if let Some("Reset to default") = l.buttons_right(&[("Reset to default", false, "")], 0.0).as_deref() {
-                    self.group = "224.0.0.2".into();
+                    self.group = "224.0.0.1".into();
                     self.port = "2237".into();
                     self.error.clear();
                 }
                 l.y += 8.0;
-                help(l, "Address: the default, 224.0.0.2, is a multicast address. WSJT-X uses it out of the box, and it lets several programs (GridTracker, JTAlert and this one) listen at the same time. A plain address such as 127.0.0.1 also works, but then only one program can receive.");
+                help(l, "Address: the default, 224.0.0.1, is a multicast address. WSJT-X uses it out of the box, and it lets several programs (GridTracker, JTAlert and this one) listen at the same time. A plain address such as 127.0.0.1 also works, but then only one program can receive.");
                 help(l, "Port: WSJT-X's default is 2237. Change it only if you changed it in WSJT-X (File > Settings > Reporting > UDP Server), or if another program already uses it.");
                 help(l, "The connection is made when setup finishes. Until WSJT-X is heard, the main window shows a \"Waiting for WSJT-X\" box that goes away by itself.");
             }
@@ -586,6 +582,7 @@ impl Wizard {
                 l.form(&mut [("Username", &mut u, 26.0, false), ("Password", &mut pw, 26.0, true)], 6.0, false);
                 self.user = u;
                 self.pass = pw;
+                Panel::check_creds_row(l, app);
                 help(l, "The username or email you sign in with at pota.app. Leave both blank to skip. The password is saved as plain text in settings.json on this computer, so use it only on a computer you trust. It is sent only to pota.app, to read your hunt counts.");
                 l.section("Respot");
                 switch(l, "Respot after each QSO", "Post the activator's spot after a logged QSO", &mut app.s.respot,
@@ -601,15 +598,8 @@ impl Wizard {
                 l.section("WSJT-X's Log QSO window");
                 switch(l, "Press OK for me", "Whenever the Log QSO window opens", &mut app.s.auto_log,
                        "WSJT-X records a QSO (and tells this program about it) only after you click OK in its Log QSO window. With this on, the program clicks OK for you a moment after the window opens, for any QSO, so contacts are never left unlogged. Turn it off if you want to check each QSO yourself.");
-                l.section("N3FJP ACLog");
-                switch(l, "Also log each QSO to ACLog", "Over ACLog's TCP API", &mut app.s.aclog_enabled,
-                       "Sends every QSO to ACLog as well, with the park reference. In ACLog, turn on Settings > Application Program Interface > TCP API and use the port shown there (usually 1100). Leave this off if ACLog already receives your QSOs straight from WSJT-X, or you would get every contact twice.");
-                let (mut h, mut port) = (self.host.clone(), self.aport.clone());
-                l.form(&mut [("ACLog host", &mut h, 24.0, false), ("ACLog port", &mut port, 8.0, false)], 6.0, false);
-                self.host = h;
-                self.aport = port;
-                error_line(l, &self.error.clone());
-                help(l, "Host: 127.0.0.1 when ACLog runs on this computer. Port: ACLog's TCP API port, 1100 unless you changed it.");
+                l.section("Also log each QSO to");
+                Panel::logger_picker(l, app, &mut self.dd, &mut self.lg_sel, &mut self.lg_bufs);
             }
             Step::Sounds => {
                 lead(l, "Two short sounds tell you what is happening while you are looking at another window. Each can be switched off or replaced with your own file (mp3, wav, wma or m4a).");
@@ -799,7 +789,20 @@ impl Wizard {
                     ("Hunting", format!("new parks only {}, after 73 {}, move Tx {}", on(s.new_parks_only), on(s.pounce_signoffs), on(s.move_tx))),
                     ("Auto CQ message", s.cq_text.clone()),
                     ("pota.app", if s.pota_user.is_empty() { "no login".to_string() } else { format!("{}, respot {}", s.pota_user, on(s.respot)) }),
-                    ("Logging", format!("press OK {}, ACLog {}", on(s.auto_log), if s.aclog_enabled { format!("on ({}:{})", s.aclog_host, s.aclog_port) } else { "off".to_string() })),
+                    ("Logging", {
+                        let mut others: Vec<String> = Vec::new();
+                        if s.aclog_enabled {
+                            others.push(format!("ACLog ({}:{})", s.aclog_host, s.aclog_port));
+                        }
+                        for k in crate::loggers::KINDS {
+                            let c = s.logger(k);
+                            if c.enabled {
+                                others.push(format!("{} ({}:{})", k.name(), c.host, c.port));
+                            }
+                        }
+                        let to = if others.is_empty() { "no other logger".to_string() } else { others.join(", ") };
+                        format!("press OK {}, {to}", on(s.auto_log))
+                    }),
                     ("Sounds", format!("QSO logged {}, wanted park {}", on(s.ding), on(s.pop))),
                     ("Radio connection", if s.rig_com.is_empty() { format!("{} {}, no port chosen (nothing will be sent)", s.rig_type, s.rig_model) } else { format!("{} {} on {}, {} baud", s.rig_type, s.rig_model, s.rig_com, s.rig_baud) }),
                     ("Radio", format!("ATT/NB/NR off {}, Tx power {}", on(s.rig_clean), s.rig_power.map_or("left alone".to_string(), |w| format!("{w} W")))),

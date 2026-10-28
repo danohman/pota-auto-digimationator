@@ -26,6 +26,8 @@ pub enum Event {
     CqTx(String),
     /// result of the Radio tab's "Test CAT Control": (all passed, lines)
     CatTest(bool, Vec<String>),
+    /// result of "Check credentials" on a pota.app sign-in page: Ok, or why it failed
+    PotaCheck(Result<(), String>),
 }
 
 /// Hands an event to the UI thread (and wakes it up).

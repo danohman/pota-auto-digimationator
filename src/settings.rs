@@ -28,6 +28,20 @@ pub struct PopGeom {
     pub h: f64,
 }
 
+/// One extra logger (see loggers.rs); a logger with no entry is off at its default port.
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
+pub struct LoggerCfg {
+    pub enabled: bool,
+    pub host: String,
+    pub port: u16,
+}
+
+impl LoggerCfg {
+    pub fn new(kind: crate::loggers::Kind) -> Self {
+        LoggerCfg { enabled: false, host: "127.0.0.1".into(), port: kind.default_port() }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -77,6 +91,9 @@ pub struct Settings {
     pub aclog_enabled: bool,
     pub aclog_host: String,
     pub aclog_port: u16,
+    /// Log4OM, DXKeeper, HRD Logbook and N1MM Logger+ by `loggers::Kind::key`
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub loggers: BTreeMap<String, LoggerCfg>,
     /// "" = detect: WSJT-X and WSJT-X Improved log to different folders
     pub adif_path: String,
     pub pounce_signoffs: bool,
@@ -109,7 +126,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            udp_group: "224.0.0.2".into(),
+            udp_group: "224.0.0.1".into(),
             udp_port: 2237,
             dry_run: true,
             max_attempts: 4,
@@ -139,6 +156,7 @@ impl Default for Settings {
             aclog_enabled: false,
             aclog_host: "127.0.0.1".into(),
             aclog_port: 1100,
+            loggers: BTreeMap::new(),
             adif_path: String::new(),
             pounce_signoffs: true,
             new_parks_only: false,
@@ -153,6 +171,17 @@ impl Default for Settings {
             window: None,
             extra: Map::new(),
         }
+    }
+}
+
+impl Settings {
+    /// The settings of one extra logger (defaults when never edited).
+    pub fn logger(&self, kind: crate::loggers::Kind) -> LoggerCfg {
+        self.loggers.get(kind.key()).cloned().unwrap_or_else(|| LoggerCfg::new(kind))
+    }
+
+    pub fn set_logger(&mut self, kind: crate::loggers::Kind, cfg: LoggerCfg) {
+        self.loggers.insert(kind.key().to_string(), cfg);
     }
 }
 

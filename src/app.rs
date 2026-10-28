@@ -340,6 +340,9 @@ pub struct App {
     rig_applied: bool,
     /// the Radio tab's CAT test is running
     pub cat_testing: bool,
+    /// "Check credentials" is running / its last result (ok, text)
+    pub cred_checking: bool,
+    pub cred_result: Option<(bool, String)>,
     timers: Vec<(f64, Timer)>,
     pub panel: Panel,
     popup: Option<PopupMenu>,
@@ -568,6 +571,8 @@ impl App {
             rig_key: None,
             rig_applied: false,
             cat_testing: false,
+            cred_checking: false,
+            cred_result: None,
             timers: vec![],
             panel: Panel::default(),
             popup: None,
@@ -744,6 +749,25 @@ impl App {
             stop_bits: self.s.rig_stop_bits,
             handshake: self.s.rig_handshake.clone(),
         }));
+    }
+
+    /// Sign in to pota.app with the given login (not saved) to see whether it works.
+    pub fn check_pota(&mut self, user: &str, pass: &str) {
+        if self.cred_checking {
+            return;
+        }
+        let (user, pass) = (user.trim().to_string(), pass.to_string());
+        if user.is_empty() || pass.is_empty() {
+            self.cred_result = Some((false, "Enter a username and a password first".into()));
+            return;
+        }
+        self.cred_checking = true;
+        self.cred_result = None;
+        let post = self.post.clone();
+        std::thread::Builder::new()
+            .name("pota-check".into())
+            .spawn(move || post(Event::PotaCheck(crate::pota_auth::login(&user, &pass).map(|_| ()).map_err(|e| e.to_string()))))
+            .ok();
     }
 
     pub fn start_cat_test(&mut self) {
@@ -1108,6 +1132,12 @@ impl App {
                             sound::play(sound::Kind::Ding, &self.s.ding_path);
                         }
                         self.respot(&q, &entry);
+                        for kind in crate::loggers::KINDS {
+                            let cfg = self.s.logger(kind);
+                            if cfg.enabled {
+                                crate::loggers::log_qso(self.post.clone(), kind, cfg.host, cfg.port, q.clone(), entry.clone());
+                            }
+                        }
                         if self.s.aclog_enabled {
                             self.aclog.log_qso(q, entry);
                         }
@@ -1146,6 +1176,13 @@ impl App {
                 if result != "ok" {
                     self.log(&format!("Could not switch WSJT-X's {what} to {value} ({result}); change it in WSJT-X"), Tag::Error);
                 }
+            }
+            Event::PotaCheck(r) => {
+                self.cred_checking = false;
+                self.cred_result = Some(match r {
+                    Ok(()) => (true, "Signed in to pota.app: these credentials work".into()),
+                    Err(e) => (false, format!("Sign-in failed: {e}")),
+                });
             }
             Event::CatTest(ok, lines) => {
                 self.cat_testing = false;
@@ -3318,7 +3355,6 @@ impl App {
                         "connect" => (Tab::Connect, Page::Main),
                         "appearance" => (Tab::Appearance, Page::Main),
                         "about" => (Tab::About, Page::Main),
-                        "aclog" => (Tab::Logging, Page::Aclog),
                         "wsjtx" => (Tab::Connect, Page::Wsjtx),
                         "pota" => (Tab::Connect, Page::Pota),
                         _ => (Tab::Hunting, Page::Main),
@@ -3376,7 +3412,7 @@ impl eframe::App for App {
             }
             // the wizard's Test CAT Control posts its result; nothing else is running yet
             while let Ok(e) = self.rx.try_recv() {
-                if let Event::CatTest(..) = e {
+                if let Event::CatTest(..) | Event::PotaCheck(..) = e {
                     self.dispatch(e, &ctx);
                 }
             }
