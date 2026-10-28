@@ -336,6 +336,7 @@ impl Wizard {
                     Kind::Ding => app.s.ding_path.clear(),
                     Kind::Pop => app.s.pop_path.clear(),
                 },
+                Do::TestCat => app.start_cat_test(),
                 Do::Page(_) | Do::Close | Do::Back | Do::Changed | Do::Tab(_) => {}
                 _ => {}
             }
@@ -624,7 +625,7 @@ impl Wizard {
                 Panel::sound_file_row(l, p, Kind::Pop, &custom);
             }
             Step::RadioConn => {
-                lead(l, "If your radio has a serial (COM or USB) CAT port, the program can set its receiver and transmit power for you on the next page. This is optional: with no port chosen, nothing is ever sent to the radio. You can also set it up later in Settings > Radio, where a Test CAT Control button checks that the radio answers.");
+                lead(l, "If your radio has a serial (COM or USB) CAT port, the program can set its receiver and transmit power for you on the next page. This is optional: with no port chosen, nothing is ever sent to the radio. The Test CAT Control button at the bottom of this page checks that the radio answers; everything here can be changed later in Settings > Radio.");
                 l.section("Radio");
                 if l.dropdown_row("Radio make", "Which CAT command set to use", "wiz-make", &app.s.rig_type, &cat::MAKES) {
                     self.dd = if self.dd == Some("make") { None } else { Some("make") };
@@ -724,6 +725,18 @@ impl Wizard {
                 if let Some(v) = l.segmented_row("Handshake", "", "wiz-handshake", &[("none", "None"), ("xonxoff", "XON/XOFF"), ("hardware", "Hardware")], &hs) {
                     app.s.rig_handshake = v.to_string();
                 }
+                let testing = app.cat_testing;
+                let b = l.small_button(if testing { "Testing…" } else { "Test CAT Control" });
+                let sz = b.size(l.ui);
+                l.y += 12.0;
+                if l.paint {
+                    let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
+                    if l.button(&b, r, Id::new("wiz-test-cat"), !testing && !app.s.rig_com.is_empty()) {
+                        l.act.push(Do::TestCat);
+                    }
+                }
+                l.y += sz.y + 4.0;
+                help(l, "Test CAT Control briefly changes NB, NR, ATT and power, checks that the radio confirms each, puts them back and shows the result. It needs a COM port above and uses the choices on this page. It is refused while WSJT-X is transmitting.");
                 help(l, "The baud rate must match the radio's own CAT setting (Yaesu FTDX101D over USB: 38400; Kenwood menu default: 9600; Icom: 19200 or Auto). Eight data bits, one stop bit and no handshake suit almost every radio; change them only if your radio's manual says so. A radio on a USB cable appears as a COM port once its driver is installed.");
             }
             Step::Radio => {

@@ -697,6 +697,55 @@ impl App {
         self.dialog.is_some()
     }
 
+    /// The open dialog, if any, as a modal over the main window (or the wizard).
+    fn draw_dialog(&mut self, ctx: &egui::Context, screen: Rect) {
+        if let Some(mut d) = self.dialog.take() {
+            // the main window can't be used while a dialog is up
+            egui::Area::new(Id::unique("modal-blocker"))
+                .order(Order::Middle)
+                .fixed_pos(Pos2::ZERO)
+                .show(ctx, |ui| {
+                    ui.allocate_response(screen.size(), Sense::click_and_drag());
+                });
+            let result = dialogs::show(&mut d, self, ctx);
+            let typed = std::mem::take(&mut d.typed);
+            match result {
+                dialogs::Outcome::Open => {
+                    if self.dialog.is_none() {
+                        self.dialog = Some(d);
+                    }
+                }
+                dialogs::Outcome::Closed => {}
+                dialogs::Outcome::Enable => match d.kind {
+                    DialogKind::ConfirmHunt => self.set_hunting(true),
+                    DialogKind::ConfirmCq => self.set_cq(true),
+                    _ => {}
+                },
+                dialogs::Outcome::StillHere => {
+                    self.presence.arm();
+                    self.log("Presence confirmed; Auto modes stay on.", Tag::Hunt);
+                }
+                dialogs::Outcome::Expired => self.presence_expired(),
+            }
+            // keys typed in a dialog window count for the presence bypass too
+            for c in typed {
+                self.bypass_keys(c);
+            }
+        }
+    }
+
+    /// Give the rig client the radio settings as they are now.
+    fn push_rig_cfg(&mut self) {
+        self.rig.set_cfg((!self.s.rig_com.is_empty()).then(|| crate::cat::Cfg {
+            rig: crate::cat::resolve(&self.s.rig_type, &self.s.rig_model, &self.s.rig_civ),
+            port: self.s.rig_com.clone(),
+            baud: self.s.rig_baud,
+            data_bits: self.s.rig_data_bits,
+            stop_bits: self.s.rig_stop_bits,
+            handshake: self.s.rig_handshake.clone(),
+        }));
+    }
+
     pub fn start_cat_test(&mut self) {
         if self.cat_testing {
             return;
@@ -705,6 +754,7 @@ impl App {
             self.dialog = Some(Dialog::new(DialogKind::CatResult(false, vec!["WSJT-X is transmitting; the test would change the transmit power. Try again between transmissions.".into()])));
             return;
         }
+        self.push_rig_cfg(); // the wizard edits the settings before they are applied
         self.cat_testing = true;
         self.rig.test();
     }
@@ -849,14 +899,7 @@ impl App {
         }
         self.move_tx.store(self.s.move_tx, Ordering::SeqCst);
         self.aclog.set_addr(self.s.aclog_host.trim(), self.s.aclog_port);
-        self.rig.set_cfg((!self.s.rig_com.is_empty()).then(|| crate::cat::Cfg {
-            rig: crate::cat::resolve(&self.s.rig_type, &self.s.rig_model, &self.s.rig_civ),
-            port: self.s.rig_com.clone(),
-            baud: self.s.rig_baud,
-            data_bits: self.s.rig_data_bits,
-            stop_bits: self.s.rig_stop_bits,
-            handshake: self.s.rig_handshake.clone(),
-        }));
+        self.push_rig_cfg();
         self.save_settings();
     }
 
@@ -3331,7 +3374,14 @@ impl eframe::App for App {
             if !self.demo.is_empty() && now > 3.0 {
                 self.run_demo(&ctx);
             }
+            // the wizard's Test CAT Control posts its result; nothing else is running yet
+            while let Ok(e) = self.rx.try_recv() {
+                if let Event::CatTest(..) = e {
+                    self.dispatch(e, &ctx);
+                }
+            }
             self.wizard_frame(&ctx, ui);
+            self.draw_dialog(&ctx, ctx.content_rect());
             ctx.request_repaint_after(Duration::from_millis(100));
             return;
         }
@@ -3398,39 +3448,7 @@ impl eframe::App for App {
         }
         self.draw_wsjtx_wait(&ctx, screen);
         self.wizard_frame(&ctx, ui); // (a re-run from Settings covers the window)
-        if let Some(mut d) = self.dialog.take() {
-            // the main window can't be used while a dialog is up
-            egui::Area::new(Id::unique("modal-blocker"))
-                .order(Order::Middle)
-                .fixed_pos(Pos2::ZERO)
-                .show(&ctx, |ui| {
-                    ui.allocate_response(screen.size(), Sense::click_and_drag());
-                });
-            let result = dialogs::show(&mut d, self, &ctx);
-            let typed = std::mem::take(&mut d.typed);
-            match result {
-                dialogs::Outcome::Open => {
-                    if self.dialog.is_none() {
-                        self.dialog = Some(d);
-                    }
-                }
-                dialogs::Outcome::Closed => {}
-                dialogs::Outcome::Enable => match d.kind {
-                    DialogKind::ConfirmHunt => self.set_hunting(true),
-                    DialogKind::ConfirmCq => self.set_cq(true),
-                    _ => {}
-                },
-                dialogs::Outcome::StillHere => {
-                    self.presence.arm();
-                    self.log("Presence confirmed; Auto modes stay on.", Tag::Hunt);
-                }
-                dialogs::Outcome::Expired => self.presence_expired(),
-            }
-            // keys typed in a dialog window count for the presence bypass too
-            for c in typed {
-                self.bypass_keys(c);
-            }
-        }
+        self.draw_dialog(&ctx, screen);
         if self.demo_tip {
             let at = Rect::from_min_size(Pos2::new(200.0, 200.0), Vec2::new(300.0, 20.0));
             self.tips.tip_area(Id::new("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));
