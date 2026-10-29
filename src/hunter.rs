@@ -1419,14 +1419,14 @@ impl Hunter {
             format!(" {shown_ref} {shown_park}").trim_end().to_string()
         };
         let new = !shown_ref.is_empty() && (self.park_is_new)(&shown_ref);
-        // "KD5QJQ (RR73) (-7 dB) at US-1091 (Lake Dardanelle State Park)"; (RR73) only for
+        // "KD5QJQ (RR73) (-7 dB at 1500 Hz) US-1091 (Lake Dardanelle State Park)"; (RR73) only for
         // sign-offs; only reasons other than a plain spot ("CQ POTA", "new park ...")
         // are spelled out.
         let extra = reason.strip_prefix("CQ POTA").unwrap_or(&reason).trim_start_matches([',', ' ']).to_string();
         let mut at = if !shown_ref.is_empty() && !shown_park.is_empty() {
-            format!(" at {shown_ref} ({shown_park})")
+            format!(" {shown_ref} ({shown_park})")
         } else if !where_.is_empty() {
-            format!(" at {}", where_.trim())
+            format!(" {}", where_.trim())
         } else {
             String::new()
         };
@@ -1440,7 +1440,7 @@ impl Hunter {
             at = " [not spotted]".into();
         }
         let extra = if extra.is_empty() { String::new() } else { format!(", {extra}") };
-        let line = format!("{}{sign} ({:+} dB){at}{extra}", p.call, d.snr);
+        let line = format!("{}{sign} ({:+} dB at {} Hz){at}{extra}", p.call, d.snr, d.df);
         self.next_cand_id += 1;
         let cand = Candidate {
             id: self.next_cand_id,
@@ -1568,7 +1568,7 @@ impl Hunter {
         t.signoff = !sign_off(&d.message).is_empty();
         t.manual = true;
         self.set_target(Some(t));
-        self.log_with(format!("CALLING {call} (you clicked Call now)  [{label}]"), Tag::Call,
+        self.log_with(format!("CALLING {call}  ({:+} dB at {} Hz)", d.snr, d.df), Tag::Call,
                       Self::qso_buttons(call, &cand.ref_, true), false);
     }
 

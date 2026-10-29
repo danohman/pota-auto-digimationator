@@ -369,7 +369,6 @@ pub struct Fonts {
     pub title: Font,
     pub toggle: Font,
     pub mono: Font,
-    pub mono_bold: Font,
     pub icon: Font,
     pub icon_small: Font,
     /// icon glyphs at the small UI size (Tk drew them in the small font's fallback)
@@ -502,7 +501,6 @@ impl Fonts {
             title: make("display-bold", 15.0),
             toggle: make("ui-bold", 11.0),
             mono: make("mono", 10.0),
-            mono_bold: make("mono-bold", 10.0),
             icon: make("icons", 11.0),
             icon_small: make("icons", 13.0),
             // Tk drew these glyphs with the small UI font's metrics (its fallback font)
