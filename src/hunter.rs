@@ -245,6 +245,8 @@ pub struct Target {
     pub tx_started: f64,
     /// the operator started this call (Call now): it keeps calling with Auto-Hunt disabled
     pub manual: bool,
+    /// the station was heard answering someone else while we were calling it
+    pub busy_with: Option<String>,
 }
 
 impl Target {
@@ -1255,7 +1257,11 @@ impl Hunter {
                 return;
             }
             if !t.answered {
-                self.log(format!("Tx disabled; stopped calling {}", t.call), Tag::Info);
+                match &t.busy_with {
+                    // WSJT-X switches Tx off itself when the station answers someone else
+                    Some(other) => self.log(format!("{} answered {other}; WSJT-X stopped calling", t.call), Tag::Info),
+                    None => self.log(format!("Tx disabled; stopped calling {}", t.call), Tag::Info),
+                }
             } else if !t.completed {
                 self.log(format!("Tx stopped before the QSO with {} completed; it is not marked worked", t.call), Tag::Skip);
             }
@@ -1287,6 +1293,11 @@ impl Hunter {
         let me = self.my_call();
         if call != me {
             self.cycle_calls.insert(call.clone());
+        }
+        if !p.to.is_empty() && base_call(&p.to) != me {
+            if let Some(t) = self.target_.as_mut().filter(|t| t.call == call && !t.answered) {
+                t.busy_with = Some(base_call(&p.to));
+            }
         }
         if !p.to.is_empty() && base_call(&p.to) == me {
             self.called_us.insert(call.clone(), self.now());
@@ -1440,12 +1451,6 @@ impl Hunter {
         }
         let extra = if extra.is_empty() { String::new() } else { format!(", {extra}") };
         let line = format!("{}{sign} ({:+} dB){at}{extra}", p.call, d.snr);
-        if let Some(min) = self.min_snr {
-            if d.snr < min {
-                self.log_with(format!("{line} [{:+} dB is below the {:+} dB threshold; not calling]", d.snr, min), Tag::Skip, Vec::new(), new);
-                return;
-            }
-        }
         self.next_cand_id += 1;
         let cand = Candidate {
             id: self.next_cand_id,
@@ -1455,6 +1460,18 @@ impl Hunter {
             ref_: ref_.clone(),
             park: park.clone(),
         };
+        if let Some(min) = self.min_snr {
+            if d.snr < min {
+                // Never queued, but the operator can override the threshold with Call now.
+                let received = self.now();
+                let actions = vec![
+                    Action { label: "Call now", kind: ActionKind::CallNow { cand, received }, active: None },
+                    Self::skip_button(&call, &ref_),
+                ];
+                self.log_with(format!("{line} [{:+} dB is below the {:+} dB threshold; not calling]", d.snr, min), Tag::Skip, actions, new);
+                return;
+            }
+        }
         if !offer_only {
             self.pending.push(cand.clone());
             if new || !self.new_parks_only {

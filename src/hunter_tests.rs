@@ -735,6 +735,19 @@ fn halting_tx_mid_call_is_not_undone() {
 }
 
 #[test]
+fn tx_off_after_the_station_answers_someone_else_says_so() {
+    let mut s = T::new();
+    s.cycle(&[dec("CQ POTA N5XYZ EM10")]);
+    s.hs(st_tx(true, true, "N5XYZ"));
+    s.adv(13.0);
+    s.hd(dec_at("K9ABC N5XYZ -11", -5, 10_600_000));
+    s.hs(st_tx(false, false, "N5XYZ"));
+    assert!(s.h.target().is_none());
+    assert!(s.logged("N5XYZ answered K9ABC; WSJT-X stopped calling"));
+    assert!(!s.logged("Tx disabled"));
+}
+
+#[test]
 fn no_resend_while_hunting_is_disabled() {
     let mut s = T::new();
     s.cycle(&[dec("W1AW N5XYZ 73")]);
