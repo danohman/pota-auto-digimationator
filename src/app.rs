@@ -2234,20 +2234,6 @@ impl App {
         let station = self.chip(&station_text, &f.ui);
         let band_dd = self.chip(&band_text, &f.ui).min_text("160m ▾").hover(p.neutral_hover);
         let mode_dd = self.chip(&mode_text, &f.ui).min_text("FT8 ▾").hover(p.neutral_hover);
-        let mut parts = vec![];
-        if let Some(s) = &st {
-            if s.tx_enabled && !s.transmitting {
-                parts.push("Tx enabled".to_string());
-            }
-            if let Some(t) = self.h.target() {
-                parts.push(format!("working {}", t.call));
-            } else if !s.dx_call.is_empty() && (s.tx_enabled || s.transmitting) {
-                // WSJT-X keeps the DX call after a QSO ends, so only show it while Tx is live.
-                parts.push(format!("DX {}", s.dx_call));
-            }
-        }
-        let dx_text = parts.join("  ·  ");
-        let dx = self.chip(&dx_text, &f.ui);
         let spots_text = self.spots_text.clone();
         let spots = self.chip(&spots_text, &f.ui).dot(Some(if self.spots_failed { p.bad } else { p.accent }));
         let radio = if connected { self.radio } else { None };
@@ -2270,7 +2256,7 @@ impl App {
         }
         // Flow the chips left to right, wrapping to a new row when the window is too
         // narrow; the pota.app chip goes at the right of the last row (or on a row of its own).
-        // kinds: 0 connection, 1 station, 2 band, 3 mode, 4 radio badge, 5 DX/target, 6 spots
+        // kinds: 0 connection, 1 station, 2 band, 3 mode, 4 radio badge, 6 spots
         let mut items: Vec<(u8, Vec2, f32)> = vec![(0, conn.size(ui), 8.0)];
         if connected {
             items.push((1, station.size(ui), 6.0));
@@ -2279,9 +2265,6 @@ impl App {
         }
         if radio.is_some() {
             items.push((4, tx.size(ui), 8.0));
-        }
-        if connected && !dx_text.is_empty() {
-            items.push((5, dx.size(ui), 8.0));
         }
         let limit = w - PAD;
         let mut placed: Vec<(u8, usize, f32)> = vec![]; // (kind, row, x)
@@ -2344,10 +2327,6 @@ impl App {
             let resp = ui.interact(bar.expand2(Vec2::new(0.0, 2.0)), Id::unique("cycle-bar"), Sense::hover());
             let mode = st.as_ref().map(|s| s.mode.clone()).unwrap_or_default();
             self.tips.tip(&resp, &format!("{mode} cycle: {} s", period_text(period)), 500, TipAt::Below(bar));
-        }
-        if let Some(at) = spot(5) {
-            let r = place(dx.size(ui), at);
-            dx.show(ui, Id::unique("dx-chip"), r, false);
         }
         let r = place(spots_sz, spot(6).unwrap());
         let resp = spots.show(ui, Id::unique("spots-chip"), r, false);
