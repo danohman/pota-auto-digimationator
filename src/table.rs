@@ -311,7 +311,7 @@ impl Table {
             let hw = measure(&f.table_heading, &head);
             let sorted = self.sort.0 == i;
             // clicking a heading sorts by it; the sorted one carries an arrow after the text
-            let hr = Rect::from_min_size(Pos2::new(pos.x, rect.top()), Vec2::new(hw + if sorted { ARROW_W + 6.0 } else { 0.0 }, head_h));
+            let hr = Rect::from_min_size(Pos2::new(pos.x, rect.top()), Vec2::new(hw + if sorted { ARROW_W + 2.0 } else { 0.0 }, head_h));
             let resp = ui.interact(hr, Id::unique((self.id, "head", i)), Sense::click());
             let hot = resp.hovered() && ui::hover_in(ui, hr);
             if hot {
@@ -321,7 +321,8 @@ impl Table {
             ui::text_on(ui, &painter, pos, &head, &f.table_heading, color, p.surface);
             if sorted {
                 // a small triangle: up = ascending in what the cells show
-                let (cx, cy) = (pos.x + hw + 6.0 + ARROW_W / 2.0, pos.y + f.table_heading.m.linespace / 2.0 + 1.0);
+                let cap = f.table_heading.size() * ui::CAP_HEIGHT;
+                let (cx, cy) = (pos.x + hw + 2.0 + ARROW_W / 2.0, pos.y + f.table_heading.m.ascent - cap / 2.0);
                 let (hwid, hgt) = (ARROW_W / 2.0, 3.5);
                 let pts = if self.sort.1 {
                     vec![Pos2::new(cx - hwid, cy + hgt / 2.0), Pos2::new(cx + hwid, cy + hgt / 2.0), Pos2::new(cx, cy - hgt)]

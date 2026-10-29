@@ -517,7 +517,11 @@ impl Fonts {
             let (upem, asc, desc) = metrics.get(fam).copied().unwrap_or((2048, 2210, 514));
             let ascent = (asc as f32 * size / upem as f32).round();
             let descent = (desc as f32 * size / upem as f32).round();
-            Font { id: FontId::new(size, FontFamily::Name(fam.into())), m: Metrics { ascent, descent, linespace: ascent + descent } }
+            let mut font = Font { id: FontId::new(size, FontFamily::Name(fam.into())), m: Metrics { ascent, descent, linespace: ascent + descent } };
+            if let Some((a, d)) = crate::ui::gdi_ascent_descent(&font) {
+                font.m = Metrics { ascent: a, descent: d, linespace: a + d };
+            }
+            font
         };
         let fonts = Fonts {
             ui: make("ui", 10.0),

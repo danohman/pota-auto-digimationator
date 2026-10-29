@@ -59,6 +59,16 @@ fn gdi_dc(face: &'static str, px: i32, weight: i32) -> Option<isize> {
     dc
 }
 
+/// The ascent and descent GDI really uses for `f` (hinting rounds them differently from
+/// the font's win metrics scaled), so text drawn from the line top sits where we assume.
+pub fn gdi_ascent_descent(f: &Font) -> Option<(f32, f32)> {
+    use windows_sys::Win32::Graphics::Gdi::{GetTextMetricsW, TEXTMETRICW};
+    let (face, weight) = family_face(f);
+    let dc = gdi_dc(face, f.size() as i32, weight)?;
+    let mut tm: TEXTMETRICW = unsafe { std::mem::zeroed() };
+    (unsafe { GetTextMetricsW(dc as _, &mut tm) } != 0).then(|| (tm.tmAscent as f32, tm.tmDescent as f32))
+}
+
 /// GDI advance of each UTF-16 unit of `w` (0 where the font has no glyph).
 fn gdi_advances(dc: isize, w: &[u16]) -> Option<Vec<f32>> {
     use windows_sys::Win32::Foundation::SIZE;

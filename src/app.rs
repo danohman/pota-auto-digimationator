@@ -1467,6 +1467,8 @@ impl App {
         }
         if steps.is_empty() {
             return;
+        // a newer request replaces any pending check, or it would blame a mode the user has already left
+        self.timers.retain(|(_, t)| !matches!(t, Timer::CheckMode(_)));
         }
         // Press WSJT-X's band/mode buttons in order on a worker thread (PowerShell takes a
         // second each); first leave the band with ATT/NB/NR at their defaults.
@@ -2376,8 +2378,8 @@ impl App {
     fn card_head(&mut self, ui: &mut Ui, card: Card, rect: Rect, hc: f32) -> f32 {
         self.card(ui, rect);
         let inner = rect.shrink(1.0);
-        let hy = inner.top() + 10.0;
-        let band = Rect::from_min_max(inner.min, Pos2::new(inner.right(), hy + hc + 4.0));
+        let hy = inner.top() + 7.0;
+        let band = Rect::from_min_max(inner.min, Pos2::new(inner.right(), hy + hc + 7.0));
         // dragging the band moves the section (not in its own window); the header's
         // buttons and boxes are drawn after this, so they take their own clicks
         if self.in_pop.is_none() {
@@ -2399,9 +2401,10 @@ impl App {
     /// A card's title (ttk label padding 2) at the head's content origin; returns its right edge.
     fn card_title(&self, ui: &Ui, x: f32, y: f32, h: f32, title: &str) -> f32 {
         let f = &self.f;
-        let lh = f.heading.m.linespace + 4.0;
-        let top = y + ((h - lh) / 2.0).floor();
-        let w = ui::text(ui, ui.painter(), Pos2::new(x + 2.0, top + 2.0), title, &f.heading, self.p.text);
+        // centre the capitals (not the line box, whose descent is deeper than its ascent)
+        let cap = f.heading.size() * ui::CAP_HEIGHT;
+        let top = y + (h / 2.0 - (f.heading.m.ascent - cap / 2.0)).round();
+        let w = ui::text(ui, ui.painter(), Pos2::new(x + 2.0, top), title, &f.heading, self.p.text);
         x + w + 4.0
     }
 
@@ -2503,7 +2506,7 @@ impl App {
             self.log.clear();
         }
         self.search_box(ui, r.left() - 10.0, title_right + 10.0, hy, head_content, "Search activity", 0);
-        let y = hy + head_content + 6.0;
+        let y = hy + head_content + 9.0;
         let body = Rect::from_min_max(Pos2::new(inner.left(), y), inner.max);
         let mut tips = std::mem::take(&mut self.tips);
         let click = self.log.show(ui, body, &p, &f, &mut tips);
@@ -2600,7 +2603,7 @@ impl App {
     /// Height of the Current Info card: title row, the lines, a little room below.
     fn info_height(&self, ui: &Ui, info: &[StaticLine]) -> f32 {
         let hc = self.f.heading.m.linespace + 4.0;
-        1.0 + 10.0 + hc + 6.0 + self.info_row_h(ui, info) * info.len() as f32 + 8.0
+        1.0 + 7.0 + hc + 9.0 + self.info_row_h(ui, info) * info.len() as f32 + 8.0
     }
 
     /// Its own card above the Activity log: current facts, timestamped like log lines,
@@ -2614,7 +2617,7 @@ impl App {
         self.card_title(ui, hx, hy, hc, "Current Info");
         self.pop_button(ui, Card::Info, inner, hy, hc);
         let info = self.build_info(ui, rect.width());
-        let (click, _) = self.static_selection(ui, &info, inner, hy + hc + 6.0);
+        let (click, _) = self.static_selection(ui, &info, inner, hy + hc + 9.0);
         match click {
             Some(StaticClick::Link) => {
                 use crate::panel::{Page, Tab};
@@ -2817,7 +2820,7 @@ impl App {
         let f = &self.f;
         let rowh = f.ui_bold.m.linespace + 2.0;
         let lx = 1.0 + PAD + 2.0;
-        let mut h = 10.0 + f.heading.m.linespace + 4.0 + 6.0 + 4.0; // header, rows, bottom
+        let mut h = 7.0 + f.heading.m.linespace + 4.0 + 9.0 + 4.0; // header, rows, bottom
         let mut wraps = vec![];
         for (band, mode, n, newest) in &self.notices {
             let w = measure(&f.ui_bold, &self.notice_label(*n, band, mode, newest));
@@ -2845,7 +2848,7 @@ impl App {
         let (wraps, _) = self.notices_layout(ui, rect.width());
         let rowh = f.ui_bold.m.linespace + 2.0;
         let lx = inner.left() + PAD + 2.0;
-        let mut top = hy + hc + 6.0;
+        let mut top = hy + hc + 9.0;
         let mut retune = None;
         let now = self.now();
         for (i, (band, mode, n, newest)) in self.notices.clone().into_iter().enumerate() {
@@ -2907,7 +2910,7 @@ impl App {
         let count = self.spots_count.clone();
         self.pill(ui, x + 8.0, hy, hc, &count, "spots-count");
         self.pop_button(ui, Card::Spots, inner, hy, hc);
-        let top = hy + hc + 6.0;
+        let top = hy + hc + 9.0;
         let table_rect = Rect::from_min_max(Pos2::new(inner.left(), top), inner.max);
         let colors = self.row_colors();
         let mut events = vec![];
@@ -3022,7 +3025,7 @@ impl App {
         let count = self.done_count.clone();
         self.pill(ui, x + 8.0, hy, hc, &count, "done-count");
         self.pop_button(ui, Card::Done, inner, hy, hc);
-        let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 6.0), inner.max);
+        let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 9.0), inner.max);
         let colors = self.row_colors();
         let mut events = vec![];
         let mut tips = std::mem::take(&mut self.tips);
@@ -3058,7 +3061,7 @@ impl App {
         if changed {
             self.render_worked();
         }
-        let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 6.0), inner.max);
+        let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 9.0), inner.max);
         let colors = self.row_colors();
         let mut events = vec![];
         let mut tips = std::mem::take(&mut self.tips);
