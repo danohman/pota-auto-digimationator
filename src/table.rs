@@ -136,26 +136,18 @@ pub enum TableEvent {
 pub struct Table {
     pub id: &'static str,
     pub columns: Vec<Col>,
-    pub hidden: Vec<&'static str>,
     pub widths: Vec<f32>,
     need: Vec<f32>,
     pub rows: Vec<Row>,
     pub scroll: Scroll,
-    /// rows shown before scrolling when the window first opens
-    pub height_rows: usize,
     /// the sorted column (index) and whether it runs ascending in what the cells show
     pub sort: (usize, bool),
 }
 
-struct Chunk {
-    asc: f32,
-    desc: f32,
-}
-
 impl Table {
-    pub fn new(id: &'static str, columns: Vec<Col>, height_rows: usize) -> Self {
+    pub fn new(id: &'static str, columns: Vec<Col>) -> Self {
         let n = columns.len();
-        Table { id, columns, hidden: vec![], widths: vec![0.0; n], need: vec![0.0; n], rows: vec![], scroll: Scroll::default(), height_rows, sort: (0, true) }
+        Table { id, columns, widths: vec![0.0; n], need: vec![0.0; n], rows: vec![], scroll: Scroll::default(), sort: (0, true) }
     }
 
     /// The column the rows start out sorted by, and its direction.
@@ -189,18 +181,10 @@ impl Table {
             .collect();
     }
 
-    pub fn fit_width(&self) -> f32 {
-        self.widths.iter().sum::<f32>() + 2.0 * PADX
-    }
-
-    fn visible(&self) -> Vec<usize> {
-        (0..self.columns.len()).filter(|&i| !self.hidden.contains(&self.columns[i].name)).collect()
-    }
-
-    /// x of each visible column (the first at 0).
+    /// x of each column (the first at 0).
     fn stops(&self) -> Vec<(usize, f32)> {
         let mut x = 0.0;
-        self.visible()
+        (0..self.columns.len())
             .into_iter()
             .map(|i| {
                 let s = (i, x);
@@ -262,23 +246,21 @@ impl Table {
     /// Line height and the text's top offset for a row (Tk centers the text when an
     /// embedded chip makes the line taller).
     fn line_metrics(&self, f: &Fonts, row: &Row) -> (f32, f32, f32) {
-        let mut chunks = vec![Chunk { asc: f.ui.m.ascent, desc: f.ui.m.descent }];
-        let mut win_h: f32 = 0.0;
-        for i in self.visible() {
-            let Some(c) = row.cells.get(i) else { continue };
+        let (mut asc, mut desc, mut win_h) = (f.ui.m.ascent, f.ui.m.descent, 0.0f32);
+        for c in row.cells.iter().take(self.columns.len()) {
             if c.icon.is_some() {
                 // offset -2 lowers the glyph two pixels
-                chunks.push(Chunk { asc: f.icon_small.m.ascent - 2.0, desc: f.icon_small.m.descent + 2.0 });
+                asc = asc.max(f.icon_small.m.ascent - 2.0);
+                desc = desc.max(f.icon_small.m.descent + 2.0);
             }
             if c.suffix.is_some() || c.lead.as_ref().is_some_and(|l| l.chip.is_none()) {
-                chunks.push(Chunk { asc: f.table_heading.m.ascent, desc: f.table_heading.m.descent });
+                asc = asc.max(f.table_heading.m.ascent);
+                desc = desc.max(f.table_heading.m.descent);
             }
             if c.chip.is_some() || c.lead.as_ref().is_some_and(|l| l.chip.is_some()) {
                 win_h = win_h.max(Self::chip_h(f));
             }
         }
-        let asc = chunks.iter().map(|c| c.asc).fold(0.0, f32::max);
-        let desc = chunks.iter().map(|c| c.desc).fold(0.0, f32::max);
         let h = (asc + desc).max(win_h);
         let shift = ((h - (asc + desc)) / 2.0).floor();
         (h, asc, shift)
@@ -286,11 +268,6 @@ impl Table {
 
     fn row_height(&self, f: &Fonts, row: &Row) -> f32 {
         3.0 + self.line_metrics(f, row).0 + 3.0
-    }
-
-    /// Height the table wants for `n` empty-looking rows (window sizing).
-    pub fn rows_height(f: &Fonts, n: usize) -> f32 {
-        n as f32 * (f.ui.m.linespace + 6.0) + 4.0
     }
 
     pub fn heading_height(f: &Fonts) -> f32 {
@@ -331,11 +308,11 @@ impl Table {
                 };
                 painter.add(egui::Shape::convex_polygon(pts, p.text, egui::Stroke::NONE));
             }
-            let hint = match self.columns[i].tip {
+            let col_tip = self.columns[i].tip;
+            tips.tip_with(&resp, 300, TipAt::Below(hr), || match col_tip {
                 Some(t) => format!("{t}\nClick to sort"),
                 None => "Click to sort".to_string(),
-            };
-            tips.tip(&resp, &hint, 300, TipAt::Below(hr));
+            });
             if resp.clicked() {
                 clicked = Some(i);
             }

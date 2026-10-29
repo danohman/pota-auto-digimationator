@@ -11,8 +11,6 @@ use eframe::epaint::text::{FontTweak, VariationCoords};
 use skrifa::raw::TableProvider;
 use skrifa::MetadataProvider;
 
-pub const MODES: [&str; 3] = ["system", "light", "dark"];
-
 pub fn hex(s: &str) -> Color32 {
     let v = u32::from_str_radix(&s[1..], 16).unwrap_or(0);
     Color32::from_rgb((v >> 16) as u8, (v >> 8) as u8, v as u8)
@@ -66,7 +64,6 @@ pub struct Palette {
     pub select: Color32,
     pub dim_row: Color32,
     pub dim_text: Color32,
-    pub separator: Color32,
     pub glow: (Color32, Color32),
     pub heard: (Color32, Color32),
     /// pulse of a new-parks line (a park new to us appeared, or its newest spot got newer); apart from the orange `new` text
@@ -78,8 +75,6 @@ pub struct Palette {
     pub new_text: Color32,
     pub atno: Color32,
     pub atno_text: Color32,
-    pub count: Color32,
-    pub count_text: Color32,
     log: [Color32; 10],
     pub disabled_btn: (Color32, Color32),
 }
@@ -117,7 +112,6 @@ impl Palette {
             select: hex("#cfe3ff"),
             dim_row: hex("#eef0f3"),
             dim_text: hex("#8b94a3"),
-            separator: hex("#e3e7ed"),
             glow: (Color32::from_rgb(252, 214, 214), Color32::from_rgb(238, 140, 140)),
             heard: (Color32::from_rgb(214, 242, 222), Color32::from_rgb(120, 214, 150)),
             notice: (Color32::from_rgb(255, 240, 214), Color32::from_rgb(252, 214, 160)),
@@ -128,8 +122,6 @@ impl Palette {
             new_text: hex("#ffffff"),
             atno: hex("#7e3fc4"),
             atno_text: hex("#ffffff"),
-            count: hex("#0891b2"),
-            count_text: hex("#ffffff"),
             log: [
                 hex("#3d4757"), hex("#1f5fbf"), hex("#c25a00"), hex("#13804a"), hex("#8b94a3"),
                 hex("#8b94a3"), hex("#7a3fb0"), hex("#c62828"), hex("#c62828"), hex("#a3abb8"),
@@ -166,7 +158,6 @@ impl Palette {
             select: hex("#2c4a73"),
             dim_row: hex("#191c22"),
             dim_text: hex("#6a7382"),
-            separator: hex("#262b34"),
             glow: (Color32::from_rgb(72, 28, 28), Color32::from_rgb(150, 48, 48)),
             heard: (Color32::from_rgb(24, 62, 38), Color32::from_rgb(40, 130, 70)),
             notice: (Color32::from_rgb(62, 40, 18), Color32::from_rgb(112, 66, 20)),
@@ -177,8 +168,6 @@ impl Palette {
             new_text: hex("#1a1208"),
             atno: hex("#b48cf0"),
             atno_text: hex("#140c20"),
-            count: hex("#22c4e0"),
-            count_text: hex("#06161a"),
             log: [
                 hex("#c4cad4"), hex("#6cb0ff"), hex("#ffa94d"), hex("#4fd394"), hex("#6a7382"),
                 hex("#6a7382"), hex("#c39bff"), hex("#ff6b6b"), hex("#ff6b6b"), hex("#5d6676"),
@@ -247,25 +236,6 @@ pub fn set_title_bar(hwnd: isize, dark: bool) {
         if r == 0 {
             break;
         }
-    }
-}
-
-/// The work area (left, top, right, bottom, physical pixels) of the monitor nearest a point.
-pub fn work_area(x: i32, y: i32) -> Option<(i32, i32, i32, i32)> {
-    use windows_sys::Win32::Foundation::POINT;
-    use windows_sys::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromPoint, MONITORINFO};
-    unsafe {
-        let mon = MonitorFromPoint(POINT { x, y }, 2); // nearest monitor
-        if mon.is_null() {
-            return None;
-        }
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        if GetMonitorInfoW(mon, &mut info) == 0 {
-            return None;
-        }
-        let w = info.rcWork;
-        Some((w.left, w.top, w.right, w.bottom))
     }
 }
 

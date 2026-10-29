@@ -10,7 +10,7 @@ use crate::app::{App, ATTEMPT_MODES};
 use crate::respot;
 use crate::sound::Kind;
 use crate::theme::{self, Font, Fonts, Palette};
-use crate::ui::{self, measure, Rnd, TipAt};
+use crate::ui::{self, measure, Rnd};
 
 mod wizard;
 pub use wizard::Wizard;
@@ -115,6 +115,8 @@ pub struct Panel {
     about_sel: Option<((usize, usize), (usize, usize))>,
     /// opened by the POTA_DEMO test hook: don't close when the window isn't focused
     demo: bool,
+    /// the other tabs' largest size and when it was measured (see `show`)
+    probe: Option<((Tab, u32, String), f64, f32, f32)>,
 }
 
 /// What a click in the panel asks for.
@@ -469,7 +471,7 @@ impl<'a> L<'a> {
         };
         let x = (anchor.right() - w).max(screen.left());
         let rect = Rect::from_min_size(Pos2::new(x, y), Vec2::new(w, h));
-        ctx.data_mut(|d| d.insert_temp(Id::new("dropdown-rect"), rect));
+        ctx.data_mut(|d| d.insert_temp(Id::unique("dropdown-rect"), rect));
         let mut out = None;
         egui::Area::new(Id::unique(("dropdown-list", id))).order(Order::Foreground).fixed_pos(rect.min).constrain(false).show(&ctx, |aui| {
             let _ = aui.allocate_exact_size(rect.size(), Sense::click());
@@ -785,7 +787,7 @@ impl Panel {
         let (fr, color) = font.resolve(f, p);
         l.y += padtop;
         let para = self.about_lines.last().map_or(0, |x| x.para + 1);
-        for line in ui::wrap_lines(l.ui, fr, s, wrap) {
+        for line in ui::wrap_lines(fr, s, wrap) {
             if l.paint {
                 let idx = self.about_lines.len();
                 let (a, b) = self.about_sel_in(idx, line.chars().count());
@@ -838,7 +840,7 @@ impl Panel {
             let fr = ln.font.resolve(f, p).0;
             (pos.x >= ln.x && pos.x <= ln.x + measure(fr, &ln.text) && pos.y >= ln.y && pos.y < ln.y + fr.m.linespace).then_some(ln.url).flatten()
         };
-        let resp = l.ui.interact(area, Id::new("about-select"), Sense::click_and_drag());
+        let resp = l.ui.interact(area, Id::unique("about-select"), Sense::click_and_drag());
         if resp.hovered() {
             if let Some(pos) = l.ui.ctx().pointer_hover_pos() {
                 l.ui.ctx().set_cursor_icon(if link_at(pos).is_some() { CursorIcon::PointingHand } else { CursorIcon::Text });
@@ -857,15 +859,7 @@ impl Panel {
         } else if resp.double_clicked() {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let (i, k) = hit(pos);
-                let chars: Vec<char> = lines[i].text.chars().collect();
-                let k = k.min(chars.len());
-                let (mut a, mut b) = (k, k);
-                while a > 0 && chars[a - 1] != ' ' {
-                    a -= 1;
-                }
-                while b < chars.len() && chars[b] != ' ' {
-                    b += 1;
-                }
+                let (a, b) = ui::word_span(&lines[i].text, k);
                 self.about_sel = if a < b { Some(((i, a), (i, b - 1))) } else { None };
                 app.clear_text_selections();
             }
@@ -1312,7 +1306,7 @@ impl Panel {
         l.y += 6.0;
         if l.paint {
             let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
-            if l.button(&b, r, Id::new("check-creds"), !checking) {
+            if l.button(&b, r, Id::unique("check-creds"), !checking) {
                 l.act.push(Do::CheckPota);
             }
             if let Some((ok, text)) = &app.cred_result {
@@ -1386,11 +1380,28 @@ impl Panel {
         // resizes (and so never moves) the panel
         let probe = Rect::from_min_size(Pos2::ZERO, Vec2::new(WIDTH, 2000.0));
         let (mut w, mut h) = (WIDTH, 0.0f32);
-        let tabs: Vec<Tab> = if self.page == Page::Main { TABS.iter().map(|t| t.0).collect() } else { vec![self.tab] };
-        for t in tabs {
-            let (nw, nh, _) = self.build(app, ui, probe, false, t);
-            w = w.max(nw);
-            h = h.max(nh);
+        let (nw, nh, _) = self.build(app, ui, probe, false, self.tab);
+        w = w.max(nw);
+        h = h.max(nh);
+        if self.page == Page::Main {
+            // the other tabs only matter for the largest size, so they are measured again
+            // at most twice a second (or when the page, tab, text size or theme changes)
+            let key = (self.tab, app.s.font_size, app.s.theme.clone());
+            let fresh = matches!(&self.probe, Some((k, t, _, _)) if *k == key && now - *t < 0.5);
+            if !fresh {
+                let (mut ow, mut oh) = (0.0f32, 0.0f32);
+                let cur = self.tab;
+                for t in TABS.iter().map(|t| t.0).filter(|t| *t != cur) {
+                    let (nw, nh, _) = self.build(app, ui, probe, false, t);
+                    ow = ow.max(nw);
+                    oh = oh.max(nh);
+                }
+                self.probe = Some((key, now, ow, oh));
+            }
+            if let Some((_, _, ow, oh)) = &self.probe {
+                w = w.max(*ow);
+                h = h.max(*oh);
+            }
         }
         let total = Vec2::new(w, h + Self::footer_h(&f));
         let gear = app.gear_rect;
@@ -1403,7 +1414,7 @@ impl Panel {
             ctx.request_repaint_after(std::time::Duration::from_millis(15));
         }
         let mut acts = vec![];
-        ctx.data_mut(|d| d.remove::<Rect>(Id::new("dropdown-rect")));
+        ctx.data_mut(|d| d.remove::<Rect>(Id::unique("dropdown-rect")));
         egui::Area::new(Id::unique("settings-panel"))
             .order(Order::Foreground)
             .fixed_pos(rect.min)
@@ -1442,7 +1453,7 @@ impl Panel {
             }
         }
         // a click elsewhere (or another app taking focus) closes it, like losing focus
-        let list = ctx.data(|d| d.get_temp::<Rect>(Id::new("dropdown-rect")));
+        let list = ctx.data(|d| d.get_temp::<Rect>(Id::unique("dropdown-rect")));
         let pressed_out = ctx.input(|i| i.pointer.any_pressed() && i.pointer.interact_pos().is_some_and(|q| !rect.contains(q) && !list.is_some_and(|r| r.contains(q))));
         let on_gear = ctx.input(|i| i.pointer.interact_pos().is_some_and(|q| gear.contains(q)));
         let focused = ctx.input(|i| i.focused);
@@ -1539,7 +1550,6 @@ impl Panel {
                 }
             }
         }
-        let _ = TipAt::Pointer;
     }
 }
 

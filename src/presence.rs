@@ -34,6 +34,7 @@ impl PresenceTimer {
         self.deadline = None;
     }
 
+    #[cfg(test)]
     pub fn armed(&self) -> bool {
         self.deadline.is_some()
     }

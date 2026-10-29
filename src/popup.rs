@@ -72,11 +72,10 @@ impl PopupMenu {
             .fixed_pos(rect.min)
             .constrain(false)
             .show(ctx, |ui| {
-                let (_, resp) = ui.allocate_exact_size(size, Sense::click());
+                let _ = ui.allocate_exact_size(size, Sense::click());
                 let painter = ui.painter();
                 painter.rect_filled(rect, ui::radius(8.0), p.surface);
                 painter.rect_stroke(rect, ui::radius(8.0), Stroke::new(1.0, p.border), StrokeKind::Inside);
-                let _ = resp;
                 let mut yy = rect.top() + 1.0;
                 for (i, it) in self.items.iter().enumerate() {
                     let h = Self::row_h(f, it);

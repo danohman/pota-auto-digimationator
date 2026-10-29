@@ -42,10 +42,6 @@ impl Kind {
         self != Kind::Logger32
     }
 
-    pub fn from_key(key: &str) -> Option<Kind> {
-        KINDS.into_iter().find(|k| k.key() == key)
-    }
-
     pub fn name(self) -> &'static str {
         match self {
             Kind::Log4om => "Log4OM",
@@ -94,21 +90,35 @@ pub fn qso_times(q: &QsoLogged, entry: &WorkedEntry) -> (DateTime<Utc>, DateTime
     (t_on, q.time_off.unwrap_or(t_on))
 }
 
+/// The station's call as WSJT-X logged it (/M and all), upper case.
+pub fn qso_call(q: &QsoLogged, entry: &WorkedEntry) -> String {
+    if q.dx_call.is_empty() { &entry.call } else { &q.dx_call }.to_uppercase()
+}
+
+/// WSJT-X's comment with " POTA <ref> <park name>" added when the park is confirmed.
+pub fn qso_comment(q: &QsoLogged, entry: &WorkedEntry) -> String {
+    if entry.ref_.is_empty() {
+        return q.comments.clone();
+    }
+    let pota = format!("POTA {} {}", entry.ref_, entry.park).trim().to_string();
+    format!("{} {pota}", q.comments).trim().to_string()
+}
+
+/// The Tx frequency in MHz with six decimals, empty when WSJT-X gave none.
+pub fn qso_freq_mhz(q: &QsoLogged) -> String {
+    if q.tx_freq != 0 { format!("{:.6}", q.tx_freq as f64 / 1e6) } else { String::new() }
+}
+
 /// The QSO as ADIF fields; empty values are left out.
 pub fn adif_fields(q: &QsoLogged, entry: &WorkedEntry) -> Vec<(&'static str, String)> {
     let (t_on, t_off) = qso_times(q, entry);
-    let call = if q.dx_call.is_empty() { &entry.call } else { &q.dx_call }.to_uppercase();
-    let mut comment = q.comments.clone();
-    if !entry.ref_.is_empty() {
-        let pota = format!("POTA {} {}", entry.ref_, entry.park).trim().to_string();
-        comment = format!("{comment} {pota}").trim().to_string();
-    }
+    let (call, comment) = (qso_call(q, entry), qso_comment(q, entry));
     // ADIF has FT4 as a submode of MFSK
     let (mode, submode) = match entry.mode.as_str() {
         "FT4" => ("MFSK", "FT4"),
         m => (m, ""),
     };
-    let freq = if q.tx_freq != 0 { format!("{:.6}", q.tx_freq as f64 / 1e6) } else { String::new() };
+    let freq = qso_freq_mhz(q);
     let mut f: Vec<(&'static str, String)> = vec![
         ("CALL", call),
         ("QSO_DATE", t_on.format("%Y%m%d").to_string()),

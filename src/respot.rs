@@ -89,17 +89,13 @@ impl Respot {
 }
 
 pub fn post(id_token: &str, body: &Value) -> Result<(), FetchError> {
-    let r = ureq::post(SPOT_URL)
+    ureq::post(SPOT_URL)
         .set("Authorization", id_token)
         .set("Content-Type", "application/json")
         .set("User-Agent", USER_AGENT)
         .timeout(Duration::from_secs(20))
-        .send_string(&body.to_string());
-    match r {
-        Ok(_) => Ok(()),
-        Err(ureq::Error::Status(code, resp)) => Err(FetchError::Http(code, resp.status_text().to_string())),
-        Err(e) => Err(FetchError::Net(e.to_string())),
-    }
+        .send_string(&body.to_string())?;
+    Ok(())
 }
 
 #[cfg(test)]

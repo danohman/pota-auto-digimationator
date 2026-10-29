@@ -32,10 +32,6 @@ pub fn band_for(freq_hz: u64) -> Option<&'static str> {
     BANDS.iter().find(|(_, lo, hi)| (*lo..=*hi).contains(&freq_hz)).map(|b| b.0)
 }
 
-pub fn utc_now() -> DateTime<Utc> {
-    Utc::now()
-}
-
 fn has_digit(s: &str) -> bool {
     s.chars().any(|c| c.is_ascii_digit())
 }
@@ -161,16 +157,17 @@ pub fn parse_message(message: &str) -> Option<Parsed> {
 /// [WorkedEntry] for QSOs in a WSJT-X ADIF log dated `today` (UTC).
 pub fn read_adif_today(path: &std::path::Path, today: NaiveDate) -> Vec<WorkedEntry> {
     let Ok(bytes) = std::fs::read(path) else { return Vec::new() };
-    let mut text = String::from_utf8_lossy(&bytes).into_owned();
+    let text = String::from_utf8_lossy(&bytes);
     static EOH: OnceLock<Regex> = OnceLock::new();
     static EOR: OnceLock<Regex> = OnceLock::new();
     static FIELD: OnceLock<Regex> = OnceLock::new();
-    if let Some(m) = re(&EOH, r"(?i)<eoh>").find(&text) {
-        text = text[m.end()..].to_string();
-    }
+    let text: &str = match re(&EOH, r"(?i)<eoh>").find(&text) {
+        Some(m) => &text[m.end()..],
+        None => &text,
+    };
     let want = today.format("%Y%m%d").to_string();
     let mut out = Vec::new();
-    for rec in re(&EOR, r"(?i)<eor>").split(&text) {
+    for rec in re(&EOR, r"(?i)<eor>").split(text) {
         let mut fields: HashMap<String, String> = HashMap::new();
         for c in re(&FIELD, r"<(\w+):(\d+)(?::\w)?>").captures_iter(rec) {
             let end = c.get(0).unwrap().end();
@@ -602,10 +599,6 @@ impl Hunter {
         self.target_.as_ref()
     }
 
-    pub fn target_mut(&mut self) -> Option<&mut Target> {
-        self.target_.as_mut()
-    }
-
     /// A target we let go of before the QSO finished is remembered for a while: a
     /// slow station may still answer and WSJT-X's Auto Seq carry on without us.
     pub fn set_target(&mut self, value: Option<Target>) {
@@ -902,6 +895,7 @@ impl Hunter {
     }
 
     /// Most recent QSO with call on band/mode today.
+    #[cfg(test)]
     pub fn worked_entry(&self, call: &str, band: &str, mode: &str) -> Option<&WorkedEntry> {
         self.worked_entries(call, band, mode).last().map(|&i| &self.worked[i])
     }
@@ -1809,6 +1803,7 @@ impl Hunter {
     }
 
     /// One number for every mode (clears the per-mode choices).
+    #[cfg(test)]
     pub fn set_max_attempts(&mut self, n: u32) {
         self.attempts_by_mode.clear();
         self.default_attempts = n;
@@ -1986,8 +1981,11 @@ impl Hunter {
 
     /// Auto CQ/Answer: when nothing else is going on, send our CQ.
     fn maybe_cq(&mut self) {
+        if !self.cq_enabled {
+            return;
+        }
         let Some(s) = self.status.clone() else { return };
-        if !(self.cq_enabled && self.io.can_send_text() && !s.de_call.is_empty() && self.band().is_some()) {
+        if !(self.io.can_send_text() && !s.de_call.is_empty() && self.band().is_some()) {
             return;
         }
         let now = self.now();

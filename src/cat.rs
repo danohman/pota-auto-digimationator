@@ -265,8 +265,8 @@ impl Item {
 fn make_set(rig: Rig, item: Item, v: u32) -> String {
     match (rig, item) {
         (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Att) => format!("11{:02}", if v == 0 { 0 } else { r.civ().map_or(20, |c| c.2) }),
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Nb) => format!("1622{v:02}"),
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Nr) => format!("1640{v:02}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Nb) => format!("1622{v:02}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Nr) => format!("1640{v:02}"),
         (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Pwr) => format!("140A{:04}", icom_level(r.civ().map_or(100, |c| c.1), v)),
         (Rig::Elecraft(_), Item::Pwr) => {
             if v <= 15 { format!("PC{:03}0;", v * 10) } else { format!("PC{v:03}1;") }
@@ -303,10 +303,10 @@ fn set_value(rig: Rig, cmd: &str) -> (Item, u32) {
 /// The Kenwood TS-590 answers ATT with more than two digits, nonzero meaning on.
 fn read_spec(rig: Rig, item: Item) -> (&'static str, &'static str, &'static str) {
     match (rig, item) {
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Att) => ("11", "11", r"\d{2}"),
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Nb) => ("1622", "1622", r"\d{2}"),
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Nr) => ("1640", "1640", r"\d{2}"),
-        (r @ (Rig::Icom(_) | Rig::Xiegu(..)), Item::Pwr) => ("140A", "140A", r"\d{4}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Att) => ("11", "11", r"\d{2}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Nb) => ("1622", "1622", r"\d{2}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Nr) => ("1640", "1640", r"\d{2}"),
+        (Rig::Icom(_) | Rig::Xiegu(..), Item::Pwr) => ("140A", "140A", r"\d{4}"),
         (Rig::Elecraft(_), Item::Pwr) => ("PC;", "PC", r"\d{3,4}"),
         (_, Item::Pwr) => ("PC;", "PC", r"\d{3}"),
         (Rig::Yaesu(_), Item::Att) => ("RA0;", "RA0", r"\d"),
@@ -455,11 +455,13 @@ fn freq_set(rig: Rig, hz: u64) -> String {
 /// The last VFO A frequency in `reply`, in Hz.
 fn freq_in(rig: Rig, reply: &str) -> Option<u64> {
     if rig.civ().is_some() {
-        let re = regex::Regex::new(r":03(\d{10});").unwrap();
+        static CIV: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+        let re = CIV.get_or_init(|| regex::Regex::new(r":03(\d{10});").unwrap());
         let d = &re.captures_iter(reply).last()?[1];
         return (0..5).rev().map(|i| &d[i * 2..i * 2 + 2]).collect::<String>().parse().ok();
     }
-    let re = regex::Regex::new(r"FA(\d{9,11});").unwrap();
+    static FA: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = FA.get_or_init(|| regex::Regex::new(r"FA(\d{9,11});").unwrap());
     re.captures_iter(reply).last()?[1].parse().ok()
 }
 

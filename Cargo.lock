@@ -2727,7 +2727,6 @@ dependencies = [
  "getrandom 0.2.17",
  "hmac",
  "num-bigint",
- "num-traits",
  "raw-window-handle",
  "regex",
  "serde",

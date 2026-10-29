@@ -206,7 +206,7 @@ impl Wizard {
         let screen = ctx.content_rect();
         ui.painter().rect_filled(screen, 0.0, p.bg);
         // covers the window behind it (a re-run draws on top of the running app)
-        ui.interact(screen, Id::new("wiz-cover"), Sense::click()); // not drag: that would stop text selection
+        ui.interact(screen, Id::unique("wiz-cover"), Sense::click()); // not drag: that would stop text selection
 
         let cw = (screen.width() - 32.0).clamp(300.0, CARD_W);
         let btn_h = Rnd::new("Next", &f.ui_bold).pill().pad(16.0, 6.0).size(ui).y;
@@ -253,7 +253,7 @@ impl Wizard {
         };
         if content > view {
             let bar = Rect::from_min_max(Pos2::new(body.right() - 12.0, body.top() + 4.0), Pos2::new(body.right() - 2.0, body.bottom() - 4.0));
-            self.scroll.bar(ui, Id::new("wiz-scroll"), bar, content, view, &p);
+            self.scroll.bar(ui, Id::unique("wiz-scroll"), bar, content, view, &p);
         }
 
         // footer: Back, (Cancel), progress dots, Next / Finish
@@ -277,14 +277,14 @@ impl Wizard {
         let back = mk("Back", false, self.step > 0);
         let sz = back.size(ui);
         let mut x = card.left() + SIDE;
-        if back.show(ui, Id::new("wiz-back"), Rect::from_min_size(Pos2::new(x, by), sz), live && self.step > 0).clicked() && live && self.step > 0 {
+        if back.show(ui, Id::unique("wiz-back"), Rect::from_min_size(Pos2::new(x, by), sz), live && self.step > 0).clicked() && live && self.step > 0 {
             nav = Some(Nav::Back);
         }
         x += sz.x + 8.0;
         if self.rerun {
             let cancel = mk("Cancel", false, true);
             let csz = cancel.size(ui);
-            if cancel.show(ui, Id::new("wiz-cancel"), Rect::from_min_size(Pos2::new(x, by), csz), live).clicked() && live {
+            if cancel.show(ui, Id::unique("wiz-cancel"), Rect::from_min_size(Pos2::new(x, by), csz), live).clicked() && live {
                 nav = Some(Nav::Cancel);
             }
             x += csz.x + 8.0;
@@ -292,7 +292,7 @@ impl Wizard {
         let next = mk(if last { "Finish" } else { "Next" }, true, true);
         let nsz = next.size(ui);
         let nx = card.right() - SIDE - nsz.x;
-        if next.show(ui, Id::new("wiz-next"), Rect::from_min_size(Pos2::new(nx, by), nsz), live).clicked() && live {
+        if next.show(ui, Id::unique("wiz-next"), Rect::from_min_size(Pos2::new(nx, by), nsz), live).clicked() && live {
             nav = Some(Nav::Next);
         }
         let dots_w = STEPS.len() as f32 * 14.0 - 6.0;
@@ -389,7 +389,7 @@ impl Wizard {
     /// The "Setup complete" box over a dimmed wizard; true when Continue is pressed.
     fn modal(&mut self, app: &App, ctx: &egui::Context, screen: Rect, p: &Palette, f: &Fonts) -> bool {
         let scrim = Color32::from_rgba_unmultiplied(p.bg.r(), p.bg.g(), p.bg.b(), 170);
-        egui::Area::new(Id::new("wiz-scrim")).order(Order::Foreground).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
+        egui::Area::new(Id::unique("wiz-scrim")).order(Order::Foreground).fixed_pos(Pos2::ZERO).show(ctx, |ui| {
             ui.painter().rect_filled(screen, 0.0, scrim);
             ui.allocate_response(screen.size(), Sense::click_and_drag());
         });
@@ -407,9 +407,9 @@ impl Wizard {
         };
         let last = "Auto-Hunt and Auto CQ/Answer start switched off. Every setting can be changed later with the gear button (or Ctrl+,), and you can run this wizard again from Settings > Appearance.";
         let paras: Vec<(Vec<String>, &crate::theme::Font, Color32)> = vec![
-            (ui::wrap_lines_measure(&f.ui, first, inner), &f.ui, p.text),
-            (ui::wrap_lines_measure(&f.small, dry, inner), &f.small, if app.s.dry_run { p.muted } else { p.warn }),
-            (ui::wrap_lines_measure(&f.small, last, inner), &f.small, p.muted),
+            (ui::wrap_lines(&f.ui, first, inner), &f.ui, p.text),
+            (ui::wrap_lines(&f.small, dry, inner), &f.small, if app.s.dry_run { p.muted } else { p.warn }),
+            (ui::wrap_lines(&f.small, last, inner), &f.small, p.muted),
         ];
         let btn = Rnd::new("Continue", &f.ui_bold).pill().pad(24.0, 7.0).colors(p.accent, p.accent_text).hover(p.accent_hover);
         let bsz = btn.size_static();
@@ -418,7 +418,7 @@ impl Wizard {
         let rect = Rect::from_center_size(screen.center(), Vec2::new(w, h));
         let rect = Rect::from_min_size(rect.min.round(), rect.size());
         let mut pressed = false;
-        egui::Area::new(Id::new("wiz-done")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
+        egui::Area::new(Id::unique("wiz-done")).order(Order::Tooltip).fixed_pos(rect.min).show(ctx, |ui| {
             let painter = ui.painter().clone();
             painter.rect_filled(rect, ui::radius(8.0), p.surface);
             let cx = rect.center().x;
@@ -439,7 +439,7 @@ impl Wizard {
             }
             y += 12.0;
             let r = Rect::from_min_size(Pos2::new((cx - bsz.x / 2.0).round(), y), bsz);
-            if btn.show(ui, Id::new("wiz-continue"), r, true).clicked() {
+            if btn.show(ui, Id::unique("wiz-continue"), r, true).clicked() {
                 pressed = true;
             }
             painter.rect_stroke(rect, ui::radius(8.0), Stroke::new(1.0, p.border), StrokeKind::Inside);
@@ -721,7 +721,7 @@ impl Wizard {
                 l.y += 12.0;
                 if l.paint {
                     let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
-                    if l.button(&b, r, Id::new("wiz-test-cat"), !testing && !app.s.rig_com.is_empty()) {
+                    if l.button(&b, r, Id::unique("wiz-test-cat"), !testing && !app.s.rig_com.is_empty()) {
                         l.act.push(Do::TestCat);
                     }
                 }

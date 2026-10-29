@@ -71,7 +71,7 @@ struct Para {
 }
 
 fn label_size(f: &Font, s: &str, wrap: f32) -> Vec2 {
-    let lines = ui::wrap_lines_measure(f, s, wrap);
+    let lines = ui::wrap_lines(f, s, wrap);
     let w = lines.iter().map(|l| measure(f, l)).fold(0.0, f32::max);
     Vec2::new(w + 2.0 * BD, lines.len() as f32 * f.m.linespace + 2.0 * BD)
 }

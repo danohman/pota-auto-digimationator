@@ -63,6 +63,15 @@ pub enum FetchError {
     Net(String),
 }
 
+impl From<ureq::Error> for FetchError {
+    fn from(e: ureq::Error) -> Self {
+        match e {
+            ureq::Error::Status(code, resp) => FetchError::Http(code, resp.status_text().to_string()),
+            e => FetchError::Net(e.to_string()),
+        }
+    }
+}
+
 impl std::fmt::Display for FetchError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -249,21 +258,15 @@ impl HuntCounts {
 }
 
 fn get_stats(id_token: &str, kind: &str) -> Result<Value, FetchError> {
-    let r = ureq::get(&format!("{STATS_URL}{kind}"))
+    let resp = ureq::get(&format!("{STATS_URL}{kind}"))
         .set("Authorization", id_token)
         .set("User-Agent", USER_AGENT)
         .set("Accept", "application/json")
         .timeout(Duration::from_secs(20))
-        .call();
-    match r {
-        Ok(resp) => {
-            let text = resp.into_string().map_err(|e| FetchError::Net(e.to_string()))?;
-            let v: Value = serde_json::from_str(&text).map_err(|e| FetchError::Net(e.to_string()))?;
-            Ok(if v.is_object() { v } else { json!({}) })
-        }
-        Err(ureq::Error::Status(code, resp)) => Err(FetchError::Http(code, resp.status_text().to_string())),
-        Err(e) => Err(FetchError::Net(e.to_string())),
-    }
+        .call()?;
+    let text = resp.into_string().map_err(|e| FetchError::Net(e.to_string()))?;
+    let v: Value = serde_json::from_str(&text).map_err(|e| FetchError::Net(e.to_string()))?;
+    Ok(if v.is_object() { v } else { json!({}) })
 }
 
 pub fn fetch_counts(id_token: &str) -> Result<HuntCounts, FetchError> {
@@ -299,13 +302,6 @@ impl StatsPoller {
     pub fn stop(&self) {
         let mut s = self.state.lock().unwrap();
         s.stop = true;
-        s.wake = true;
-        self.cv.notify_all();
-    }
-
-    /// Fetch the hunt counts again now (keeps the sign-in).
-    pub fn refresh(&self) {
-        let mut s = self.state.lock().unwrap();
         s.wake = true;
         self.cv.notify_all();
     }

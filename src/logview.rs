@@ -179,8 +179,7 @@ impl LogView {
         }
     }
 
-    fn matches(&self, l: &Line) -> bool {
-        let words: Vec<String> = self.filter.to_lowercase().split_whitespace().map(str::to_string).collect();
+    fn matches(words: &[String], l: &Line) -> bool {
         if words.is_empty() {
             return true;
         }
@@ -269,7 +268,12 @@ impl LogView {
     fn layout(&mut self, f: &Fonts, avail: f32, cw: f32) -> Vec<f32> {
         let mut heights = Vec::with_capacity(self.lines.len());
         let filter_words = !self.filter.trim().is_empty();
-        let shown: Vec<bool> = if filter_words { self.lines.iter().map(|l| self.matches(l)).collect() } else { vec![true; self.lines.len()] };
+        let shown: Vec<bool> = if filter_words {
+            let words: Vec<String> = self.filter.to_lowercase().split_whitespace().map(str::to_string).collect();
+            self.lines.iter().map(|l| Self::matches(&words, l)).collect()
+        } else {
+            vec![true; self.lines.len()]
+        };
         for (i, l) in self.lines.iter_mut().enumerate() {
             if !shown[i] {
                 heights.push(0.0);
@@ -403,7 +407,7 @@ impl LogView {
         let mut clicked = None;
 
         // Mouse selection: drag to select, double-click for a word, Ctrl+C copies.
-        let resp = ui.interact(text_rect, Id::new("log-select"), Sense::click_and_drag());
+        let resp = ui.interact(text_rect, Id::unique("log-select"), Sense::click_and_drag());
         if resp.drag_started() && hover_ok {
             if let Some((i, k)) = resp.interact_pointer_pos().and_then(|pos| self.hit(pos, text_rect, &heights, f, cw)) {
                 let at = (self.lines[i].uid, k);
@@ -427,15 +431,7 @@ impl LogView {
             }
         } else if resp.double_clicked() {
             if let Some((i, k)) = resp.interact_pointer_pos().and_then(|pos| self.hit(pos, text_rect, &heights, f, cw)) {
-                let chars: Vec<char> = self.lines[i].text.chars().collect();
-                let k = k.min(chars.len());
-                let (mut a, mut b) = (k, k);
-                while a > 0 && chars[a - 1] != ' ' {
-                    a -= 1;
-                }
-                while b < chars.len() && chars[b] != ' ' {
-                    b += 1;
-                }
+                let (a, b) = ui::word_span(&self.lines[i].text, k);
                 let uid = self.lines[i].uid;
                 self.sel = if a < b { Some(((uid, a), (uid, b - 1))) } else { None };
                 self.sel_ts = (false, false);

@@ -157,7 +157,8 @@ impl SpotTable {
     }
 
     pub fn count(&self, band: &str, mode: &str) -> usize {
-        self.on(band, mode).len()
+        let mode = mode.to_uppercase();
+        self.all().filter(|s| s.band == Some(band) && s.mode == mode).count()
     }
 }
 

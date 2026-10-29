@@ -83,7 +83,7 @@ pub fn app_name() -> String {
     if n.is_empty() { "WSJT-X".into() } else { n }
 }
 
-/// Look at the running windows again, at most every 15 s.
+/// Look at the running windows again, at most every 5 s.
 pub fn refresh_app_name(client_id: &str) {
     // Improved reports "WS"; stock WSJT-X and WSJT-Z both report "WSJT-X". A different id
     // than last time means the operator switched programs, so look again at once.

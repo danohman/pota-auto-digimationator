@@ -12,7 +12,7 @@ use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, Timelike, Utc};
+use chrono::{DateTime, Utc};
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
 use crate::aclog::AclogClient;
@@ -134,7 +134,17 @@ impl HunterIo for AppIo {
     }
 
     fn log_window_open(&mut self) -> Option<bool> {
-        Some(!logdialog::find_log_windows().is_empty())
+        // tick polls this 10x a second and EnumWindows walks every window: reuse a result under 0.4 s old
+        static LAST: std::sync::Mutex<Option<(Instant, bool)>> = std::sync::Mutex::new(None);
+        let mut last = LAST.lock().unwrap();
+        if let Some((t, open)) = *last {
+            if t.elapsed() < Duration::from_millis(400) {
+                return Some(open);
+            }
+        }
+        let open = !logdialog::find_log_windows().is_empty();
+        *last = Some((Instant::now(), open));
+        Some(open)
     }
 }
 
@@ -229,66 +239,32 @@ impl Panes {
 }
 
 /// One line of the Activity card's static area.
+#[derive(Clone)]
 struct StaticLine {
     /// HH:MM:SS shown before the text; empty for a continuation line
     ts: String,
     text: String,
     /// drawn as a link to the pota.app account settings
     link: bool,
-    /// a button after the text: (label, enabled, what a click does)
-    button: Option<(String, bool, StaticClick)>,
     /// drawn in the error color (a failed sign-in or fetch)
     bad: bool,
 }
 
 impl StaticLine {
     fn new(ts: String, text: String) -> Self {
-        StaticLine { ts, text, link: false, button: None, bad: false }
+        StaticLine { ts, text, link: false, bad: false }
     }
 }
 
-/// Word-wrap the static lines to `avail` px. Continuation rows have no stamp; the
-/// button goes after the last row, or on a row of its own when it doesn't fit there
-/// (`btn_w` is its width plus the gap).
-fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32, btn_w: f32) -> Vec<StaticLine> {
+/// Word-wrap the static lines to `avail` px. Continuation rows have no stamp.
+fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32) -> Vec<StaticLine> {
     let mut out = Vec::new();
     for l in info {
-        let mut rows: Vec<String> = Vec::new();
-        let mut cur = String::new();
-        for word in l.text.split(' ') {
-            let try_ = if cur.is_empty() { word.to_string() } else { format!("{cur} {word}") };
-            if !cur.is_empty() && measure(font, &try_) > avail {
-                rows.push(std::mem::take(&mut cur));
-                cur = word.to_string();
-            } else {
-                cur = try_;
-            }
-        }
-        rows.push(cur);
-        let n = rows.len();
-        for (i, text) in rows.into_iter().enumerate() {
-            let last = i + 1 == n;
-            let mut row = StaticLine { ts: if i == 0 { l.ts.clone() } else { String::new() }, text, link: l.link, button: None, bad: l.bad };
-            if last {
-                match l.button.clone() {
-                    Some(b) if row.text.is_empty() || measure(font, &row.text) + btn_w <= avail => row.button = Some(b),
-                    Some(b) => {
-                        out.push(row);
-                        row = StaticLine { ts: String::new(), text: String::new(), link: false, button: Some(b), bad: false };
-                    }
-                    None => {}
-                }
-            }
-            out.push(row);
+        for (i, text) in ui::wrap_lines(font, &l.text, avail).into_iter().enumerate() {
+            out.push(StaticLine { ts: if i == 0 { l.ts.clone() } else { String::new() }, text, link: l.link, bad: l.bad });
         }
     }
     out
-}
-
-#[derive(Clone, Copy)]
-enum StaticClick {
-    Link,
-    Refresh,
 }
 
 pub struct App {
@@ -330,8 +306,8 @@ pub struct App {
     done_count: String,
     worked_count: String,
     waiting: (String, bool),
-    spinner_angle: f32,
     notices: Vec<(String, String, usize, String)>,
+    info_cache: Option<((u64, u32), Vec<StaticLine>)>,
     heard: HashMap<String, f64>,
     /// newest spot time seen per new-parks line (band, mode), and until when each pulses
     notice_seen: HashMap<(String, String), String>,
@@ -564,9 +540,9 @@ impl App {
             p,
             f,
             log: LogView::new(),
-            spots_tree: Table::new("spots", spots_cols, 8).sorted_by("ago", true),
-            done_tree: Table::new("done", done_cols, 4).sorted_by("ago", true),
-            worked_tree: Table::new("worked", worked_cols, 8).sorted_by("time", false),
+            spots_tree: Table::new("spots", spots_cols).sorted_by("ago", true),
+            done_tree: Table::new("done", done_cols).sorted_by("ago", true),
+            worked_tree: Table::new("worked", worked_cols).sorted_by("time", false),
             worked_filter: String::new(),
             spots_key: None,
             spots_title: SPOTS_TITLE.into(),
@@ -578,8 +554,8 @@ impl App {
             done_count: "0".into(),
             worked_count: "0".into(),
             waiting: (String::new(), true),
-            spinner_angle: 0.0,
             notices: vec![],
+            info_cache: None,
             heard: HashMap::new(),
             notice_seen: HashMap::new(),
             notice_pulse: HashMap::new(),
@@ -1303,7 +1279,6 @@ impl App {
                 }
             }
         }
-        let _ = ctx;
     }
 
     fn update_wsjtx_status(&mut self) {
@@ -1429,10 +1404,6 @@ impl App {
                 }
             }
         }
-    }
-
-    pub fn retune_blocker(&mut self) -> Option<String> {
-        self.h.retune_blocker()
     }
 
     fn retune_menu(&mut self, which: &str) {
@@ -1935,7 +1906,6 @@ impl App {
         self.refresh_spots_list();
         self.refresh_heard_cells();
         self.presence_tick();
-        let _ = now.second();
     }
 
     fn run_timers(&mut self) {
@@ -2059,7 +2029,7 @@ impl App {
         let k = self.ppp;
         let (w, h) = ((inner.width() * k).round() as i32, (inner.height() * k).round() as i32);
         let (x, y) = ((outer.left() * k).round() as i32, (outer.top() * k).round() as i32);
-        let sx = |v: i32| if v < 0 { format!("+{v}") } else { format!("+{v}") };
+        let sx = |v: i32| format!("+{v}");
         Some(format!("{w}x{h}{}{}", sx(x), sx(y)))
     }
 
@@ -2198,7 +2168,7 @@ impl App {
                     if vx + hw + sz.x + 2.0 + tail_w <= room + tx + 2.0 {
                         ui::text(ui, &painter, at, &head, &f.small, p.muted);
                         let r = Rect::from_min_size(Pos2::new(vx + hw, vy + ((f.small.m.linespace - sz.y) / 2.0).floor()), sz);
-                        let resp = chip.show(ui, Id::new("update-chip"), r, true);
+                        let resp = chip.show(ui, Id::unique("update-chip"), r, true);
                         self.tips.tip(&resp, "Download the new version, install it and restart the app", 300, TipAt::Below(r));
                         ui::text(ui, &painter, Pos2::new(r.right() + 2.0, vy), ")", &f.small, p.muted);
                         if resp.clicked() {
@@ -2217,7 +2187,7 @@ impl App {
                         if !self.update_busy {
                             // clicking it checks for a new version right now
                             let r = Rect::from_min_size(at, Vec2::new(tw, f.small.m.linespace));
-                            let resp = ui.interact(r, Id::new("update-status"), egui::Sense::click());
+                            let resp = ui.interact(r, Id::unique("update-status"), egui::Sense::click());
                             if resp.hovered() {
                                 ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
                             }
@@ -2543,9 +2513,22 @@ impl App {
             }
         }
     }
+    /// `build_info`, built once per frame and width (the column layout and the card both ask).
+    fn info_lines(&mut self, ui: &Ui, card_w: f32) -> Vec<StaticLine> {
+        let key = (ui.ctx().cumulative_pass_nr(), card_w.to_bits());
+        if let Some((k, lines)) = &self.info_cache {
+            if *k == key {
+                return lines.clone();
+            }
+        }
+        let lines = self.build_info(card_w);
+        self.info_cache = Some((key, lines.clone()));
+        lines
+    }
+
 
     /// The lines of the Current Info card, oldest first, wrapped for a card `card_w` wide.
-    fn build_info(&mut self, ui: &Ui, card_w: f32) -> Vec<StaticLine> {
+    fn build_info(&mut self, card_w: f32) -> Vec<StaticLine> {
         let f = self.f.clone();
         let mut info: Vec<StaticLine> = vec![];
         if let Some(st) = &self.h.status {
@@ -2600,27 +2583,17 @@ impl App {
         groups.sort_by(|a, b| a[0].ts.cmp(&b[0].ts));
         let info: Vec<StaticLine> = groups.into_iter().flatten().collect();
         // wrap to the card's width (a narrow window): the text starts after the 10-column stamp
-        let btn_w = info
-            .iter()
-            .filter_map(|l| l.button.as_ref())
-            .map(|b| Rnd::new(&b.0, &f.small_bold).pill().pad(9.0, 1.0).size(ui).x + 10.0)
-            .fold(0.0, f32::max);
-        wrap_static(info, &f.ui, avail, btn_w)
+        wrap_static(info, &f.ui, avail)
     }
 
-    fn info_row_h(&self, ui: &Ui, info: &[StaticLine]) -> f32 {
-        let f = &self.f;
-        let mut lh = f.ui.m.linespace + 2.0;
-        if info.iter().any(|l| l.button.is_some()) {
-            lh = lh.max(Rnd::new("Refresh now", &f.small_bold).pill().pad(9.0, 1.0).size(ui).y + 2.0);
-        }
-        lh
+    fn info_row_h(&self) -> f32 {
+        self.f.ui.m.linespace + 2.0
     }
 
     /// Height of the Current Info card: title row, the lines, a little room below.
-    fn info_height(&self, ui: &Ui, info: &[StaticLine]) -> f32 {
+    fn info_height(&self, info: &[StaticLine]) -> f32 {
         let hc = self.f.heading.m.linespace + 4.0;
-        1.0 + 7.0 + hc + 9.0 + self.info_row_h(ui, info) * info.len() as f32 + 8.0
+        1.0 + 7.0 + hc + 9.0 + self.info_row_h() * info.len() as f32 + 8.0
     }
 
     /// Its own card above the Activity log: current facts, timestamped like log lines,
@@ -2633,22 +2606,14 @@ impl App {
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         self.card_title(ui, hx, hy, hc, "Current Info");
         self.pop_button(ui, Card::Info, inner, hy, hc);
-        let info = self.build_info(ui, rect.width());
-        let (click, _) = self.static_selection(ui, &info, inner, hy + hc + 9.0);
-        match click {
-            Some(StaticClick::Link) => {
-                use crate::panel::{Page, Tab};
-                let now = self.now();
-                let mut panel = std::mem::take(&mut self.panel);
-                panel.open_at(self, now, Tab::Connect, Page::Pota);
-                self.panel = panel;
-            }
-            Some(StaticClick::Refresh) => {
-                if let Some(s) = &self.stats {
-                    s.refresh();
-                }
-            }
-            None => {}
+        let info = self.info_lines(ui, rect.width());
+        let (link_clicked, _) = self.static_selection(ui, &info, inner, hy + hc + 9.0);
+        if link_clicked {
+            use crate::panel::{Page, Tab};
+            let now = self.now();
+            let mut panel = std::mem::take(&mut self.panel);
+            panel.open_at(self, now, Tab::Connect, Page::Pota);
+            self.panel = panel;
         }
     }
 
@@ -2674,16 +2639,16 @@ impl App {
     /// Draw the static lines of the Activity card, selectable with the mouse like the
     /// log below (drag, double-click a word, Ctrl+C). `y0` is the top of the first
     /// line. Returns what was clicked, if anything, and the height used.
-    fn static_selection(&mut self, ui: &mut Ui, info: &[StaticLine], inner: Rect, y0: f32) -> (Option<StaticClick>, f32) {
+    fn static_selection(&mut self, ui: &mut Ui, info: &[StaticLine], inner: Rect, y0: f32) -> (bool, f32) {
         let (p, f) = (self.p.clone(), self.f.clone());
         let x0 = inner.left() + PAD + 2.0;
         if info.is_empty() {
             self.static_sel = None;
-            return (None, 0.0);
+            return (false, 0.0);
         }
         let cw = measure(&f.mono, "0");
         let xt = x0 + 10.0 * cw; // text starts after "HH:MM:SS  "
-        let lh = self.info_row_h(ui, info);
+        let lh = self.info_row_h();
         let area = Rect::from_min_max(Pos2::new(inner.left(), y0), Pos2::new(inner.right(), y0 + lh * info.len() as f32));
         let hit = |pos: Pos2| -> (usize, usize) {
             let i = (((pos.y - y0) / lh).floor().max(0.0) as usize).min(info.len() - 1);
@@ -2695,8 +2660,8 @@ impl App {
             (i, k)
         };
         let hover_ok = ui::hover_in(ui, area);
-        let resp = ui.interact(area, Id::new("static-select"), egui::Sense::click_and_drag());
-        let mut click = None;
+        let resp = ui.interact(area, Id::unique("static-select"), egui::Sense::click_and_drag());
+        let mut link_clicked = false;
         if resp.hovered() && hover_ok {
             if let Some(pos) = ui.ctx().pointer_hover_pos() {
                 let i = hit(pos).0;
@@ -2718,15 +2683,7 @@ impl App {
         } else if resp.double_clicked() {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let (i, k) = hit(pos);
-                let chars: Vec<char> = info[i].text.chars().collect();
-                let k = k.min(chars.len());
-                let (mut a, mut b) = (k, k);
-                while a > 0 && chars[a - 1] != ' ' {
-                    a -= 1;
-                }
-                while b < chars.len() && chars[b] != ' ' {
-                    b += 1;
-                }
+                let (a, b) = ui::word_span(&info[i].text, k);
                 self.static_sel = if a < b { Some(((i, a), (i, b - 1))) } else { None };
                 self.log.clear_selection();
             }
@@ -2735,7 +2692,7 @@ impl App {
             if let Some(pos) = resp.interact_pointer_pos() {
                 let i = hit(pos).0;
                 if info[i].link && pos.x < xt + measure(&f.ui, &info[i].text) {
-                    click = Some(StaticClick::Link);
+                    link_clicked = true;
                 }
             }
         } else if ui.input(|i| i.pointer.any_pressed()) && !hover_ok {
@@ -2799,25 +2756,8 @@ impl App {
                 let seg: String = chars[from..to].iter().collect();
                 ui::text_on(ui, ui.painter(), Pos2::new(px, ty), &seg, &f.ui, color, bg);
             }
-            if let Some((label, enabled, what)) = &line.button {
-                let enabled = *enabled;
-                let b = Rnd::new(label, &f.small_bold).pill().pad(9.0, 1.0);
-                let b = if enabled { b.colors(p.blue, p.blue_text).hover(p.blue_hover) } else { b.colors(p.disabled_btn.0, p.disabled_btn.1) };
-                let sz = b.size(ui);
-                let after = if line.text.is_empty() { 0.0 } else { measure(&f.ui, &line.text) + 10.0 };
-                let r = Rect::from_min_size(Pos2::new(xt + after, y + ((lh - sz.y) / 2.0).floor()), sz);
-                let resp = b.show(ui, Id::new(("static-button", label.as_str())), r, enabled);
-                let tip = match (what, enabled) {
-                    (_, true) => "Fetch your hunt counts from pota.app again now",
-                    (_, false) => "Counts were fetched less than a minute ago",
-                };
-                self.tips.tip(&resp, tip, 300, TipAt::Below(r));
-                if enabled && resp.clicked() {
-                    click = Some(*what);
-                }
-            }
         }
-        (click, lh * info.len() as f32)
+        (link_clicked, lh * info.len() as f32)
     }
 
     fn notice_label(&self, n: usize, band: &str, mode: &str, newest: &str) -> String {
@@ -2965,8 +2905,7 @@ impl App {
         let p = &self.p;
         let r = 36.0 - 7.0 / 2.0 - 1.0;
         painter.circle_stroke(center, r, Stroke::new(7.0, p.border));
-        self.spinner_angle = ((self.now() / 0.03) as f32 * -12.0).rem_euclid(360.0);
-        let start = self.spinner_angle.to_radians();
+        let start = ((self.now() / 0.03) as f32 * -12.0).rem_euclid(360.0).to_radians();
         let pts: Vec<Pos2> = (0..=40)
             .map(|i| {
                 let a = start + (100f32.to_radians()) * i as f32 / 40.0;
@@ -3090,7 +3029,7 @@ impl App {
 
     /// The panes (log | spots / done / worked) with their draggable dividers.
     /// The saved section order and heights, or the defaults when they are missing or wrong.
-    fn load_arrangement(&mut self, total_h: f32) {
+    fn load_arrangement(&mut self, ) {
         let layout = self.s.layout.clone();
         let cols = layout.as_ref().and_then(|l| l.cols.as_ref()).and_then(|cols| {
             let cols: Vec<Vec<Card>> = cols.iter().map(|c| c.iter().filter_map(|k| Card::from_key(k)).collect()).collect();
@@ -3110,7 +3049,6 @@ impl App {
             }
         } else if let Some(s) = layout.and_then(|l| l.split).filter(|s| s.len() == 2 && 0.1 < s[0] && s[0] < s[1] && s[1] < 0.95) {
             // the old layout: two divider positions as fractions of the right column
-            let _ = total_h;
             self.panes.weights.insert(Card::Spots, s[0] as f32);
             self.panes.weights.insert(Card::Done, (s[1] - s[0]) as f32);
             self.panes.weights.insert(Card::Worked, (1.0 - s[1]) as f32);
@@ -3128,8 +3066,8 @@ impl App {
             .iter()
             .map(|c| match c {
                 Card::Info if w > 120.0 => {
-                    let info = self.build_info(ui, w);
-                    Some(self.info_height(ui, &info).min(col_h * 0.55))
+                    let info = self.info_lines(ui, w);
+                    Some(self.info_height(&info).min(col_h * 0.55))
                 }
                 Card::Notices => Some(self.notices_layout(ui, w).1.min(col_h * 0.4)),
                 _ => None,
@@ -3167,7 +3105,7 @@ impl App {
             // neither side may start out collapsed, however narrow the window is
             let min_pane = (total.x * 0.3).min(200.0);
             self.panes.left = (total.x - right_w).clamp(min_pane, total.x - min_pane);
-            self.load_arrangement(total.y);
+            self.load_arrangement();
             self.panes.placed = true;
             self.panes.last = total;
         } else if self.panes.placed && total != self.panes.last {
@@ -3271,7 +3209,7 @@ impl App {
             (None, Some(r)) => r.bottom() + 5.0,
             (None, None) => area.top() + 2.0,
         };
-        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Tooltip, Id::new("card-drag")));
+        let painter = ui.ctx().layer_painter(egui::LayerId::new(Order::Tooltip, Id::unique("card-drag")));
         if others.is_empty() {
             painter.rect_stroke(Rect::from_min_size(Pos2::new(mx, area.top()), Vec2::new(mw, area.height())), 0.0, Stroke::new(2.0, p.accent), StrokeKind::Inside);
         } else {
@@ -3677,12 +3615,8 @@ impl eframe::App for App {
         // the settings panel, popups and dialogs
         let mut panel = std::mem::take(&mut self.panel);
         panel.show(self, &ctx, ui);
-        if !self.panel.is_open() && !panel.is_open() {
-            self.panel = panel;
-        } else if self.panel.is_open() {
-            // the panel was toggled during show (e.g. Ctrl+,) — keep the newer state
-        } else {
-            self.panel = panel;
+        if !self.panel.is_open() {
+            self.panel = panel; // (if it was toggled during show, e.g. Ctrl+, keep the newer state)
         }
         if let Some(menu) = if self.popup_in.is_none() { self.popup.take() } else { None } {
             match menu.show(&ctx, ui, &self.p, &self.f) {
@@ -3695,7 +3629,7 @@ impl eframe::App for App {
         self.draw_dialog(&ctx, screen);
         if self.demo_tip {
             let at = Rect::from_min_size(Pos2::new(200.0, 200.0), Vec2::new(300.0, 20.0));
-            self.tips.tip_area(Id::new("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));
+            self.tips.tip_area(Id::unique("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));
         }
         self.draw_popouts(&ctx);
         let tips_font = self.f.tip.clone();
@@ -3728,7 +3662,6 @@ impl eframe::App for App {
             || (!self.waiting.0.is_empty() && self.waiting.1) || self.dialog.is_some()
             || self.log.buttons_mut().any(|b| b.glowing);
         ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 100 }));
-        let _ = Stroke::NONE;
     }
 
     fn on_exit(&mut self) {

@@ -7,7 +7,6 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use regex::Regex;
 
 use crate::events::{Event, Post};
@@ -28,15 +27,8 @@ pub fn aclog_band(band: &str) -> &str {
 
 /// ADDDIRECT command for a WSJT-X QsoLogged message plus park info.
 pub fn build_add_command(q: &QsoLogged, entry: &WorkedEntry, park_field: Option<&str>) -> String {
-    let t_on: DateTime<Utc> = q.time_on.or(q.time_off).or(entry.time).unwrap_or_else(Utc::now);
-    let t_off = q.time_off.unwrap_or(t_on);
-    let mut comments = q.comments.clone();
-    if !entry.ref_.is_empty() {
-        let pota = format!("POTA {} {}", entry.ref_, entry.park).trim().to_string();
-        comments = format!("{comments} {pota}").trim().to_string();
-    }
-    let call = if q.dx_call.is_empty() { &entry.call } else { &q.dx_call }.to_uppercase();
-    let freq = if q.tx_freq != 0 { format!("{:.6}", q.tx_freq as f64 / 1e6) } else { String::new() };
+    let (t_on, t_off) = crate::loggers::qso_times(q, entry);
+    let (call, comments, freq) = (crate::loggers::qso_call(q, entry), crate::loggers::qso_comment(q, entry), crate::loggers::qso_freq_mhz(q));
     let mut fields: Vec<(&str, String)> = vec![
         ("fldCall", call), // as WSJT-X logged it, /M and all
         ("fldDateStr", t_on.format("%Y/%m/%d").to_string()),
@@ -119,7 +111,7 @@ impl AclogClient {
         let mut buf = Vec::new();
         let mut chunk = [0u8; 65536];
         loop {
-            if String::from_utf8_lossy(&buf).trim_end().ends_with("</CMD>") {
+            if buf.trim_ascii_end().ends_with(b"</CMD>") {
                 break;
             }
             match s.read(&mut chunk) {
@@ -172,7 +164,7 @@ impl AclogClient {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+    use chrono::{TimeZone, Utc};
 
     #[test]
     fn add_command() {

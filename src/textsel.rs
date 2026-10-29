@@ -76,10 +76,6 @@ fn card_at(runs: &[Run], anchor: Pos2, layer: LayerId, window: Rect) -> Option<R
 }
 
 impl TextSelect {
-    pub fn clear(&mut self) {
-        self.sel = None;
-    }
-
     /// Run once at the end of every frame. Returns true when a selection has just
     /// started (the caller drops the other selections so Ctrl+C copies this one).
     pub fn end_frame(&mut self, ctx: &Context, color: Color32) -> bool {

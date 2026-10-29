@@ -23,7 +23,6 @@ pub const REPLY: u32 = 4;
 pub const QSO_LOGGED: u32 = 5;
 pub const CLOSE: u32 = 6;
 pub const HALT_TX: u32 = 8;
-pub const FREE_TEXT: u32 = 9;
 pub const CONFIGURE: u32 = 15;
 
 /// Reply modifiers: keys "held" during the double-click. Ctrl moves Tx to the
@@ -145,11 +144,13 @@ impl Writer {
         self
     }
 
+    #[cfg(test)]
     pub fn u64(mut self, v: u64) -> Self {
         self.buf.extend_from_slice(&v.to_be_bytes());
         self
     }
 
+    #[cfg(test)]
     pub fn i64(mut self, v: i64) -> Self {
         self.buf.extend_from_slice(&v.to_be_bytes());
         self
@@ -179,6 +180,7 @@ impl Writer {
         self.u32(ms.unwrap_or(NULL_LEN))
     }
 
+    #[cfg(test)]
     pub fn qdatetime(self, dt: DateTime<Utc>) -> Self {
         let jd = dt.date_naive().num_days_from_ce() as i64 + JD_OFFSET;
         let t = dt.time();
@@ -192,6 +194,7 @@ impl Writer {
     }
 }
 
+#[cfg(test)]
 use chrono::Datelike;
 
 pub fn header(msg_type: u32, client_id: &str) -> Writer {
@@ -372,13 +375,6 @@ pub fn build_configure(client_id: &str, mode: &str) -> Vec<u8> {
         .bytes()
 }
 
-/// FreeText(9): puts `text` in WSJT-X's free-text (Tx5) box; with `send` it also
-/// enables Tx. Kept for reference: it neither enables Tx nor reliably fills Tx5.
-#[allow(dead_code)]
-pub fn build_free_text(client_id: &str, text: &str, send: bool) -> Vec<u8> {
-    header(FREE_TEXT, client_id).str(text).bool(send).bytes()
-}
-
 /// What the listener thread shares with the app: where WSJT-X sends from, and
 /// the socket to answer it on.
 pub struct ListenerShared {
@@ -514,7 +510,6 @@ fn is_duplicate(recent: &mut HashMap<u64, Instant>, data: &[u8]) -> bool {
     let now = Instant::now();
     let mut h = std::collections::hash_map::DefaultHasher::new();
     data.hash(&mut h);
-    data.len().hash(&mut h);
     let key = h.finish();
     let seen = recent.insert(key, now);
     if recent.len() > 500 {

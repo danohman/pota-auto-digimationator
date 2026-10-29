@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use eframe::egui::{self, Align2, Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, Ui, Vec2};
+use eframe::egui::{self, Color32, CornerRadius, CursorIcon, Id, Pos2, Rect, Response, Sense, Ui, Vec2};
 use eframe::epaint::Galley;
 
 use crate::theme::{Font, Palette};
@@ -20,7 +20,7 @@ thread_local! {
     /// (face, px, weight) -> memory DC with that font selected (None: GDI substituted it)
     static DCS: RefCell<HashMap<(&'static str, i32, i32), Option<isize>>> = RefCell::new(HashMap::new());
     /// (face, px, weight, text) -> x of each char, then the total width
-    static POSITIONS: RefCell<HashMap<(&'static str, i32, i32, String), Rc<Vec<f32>>>> = RefCell::new(HashMap::new());
+    static POSITIONS: RefCell<(usize, HashMap<(&'static str, i32, i32), HashMap<String, Rc<Vec<f32>>>>)> = RefCell::new((0, HashMap::new()));
 }
 
 fn family_face(f: &Font) -> (&'static str, i32) {
@@ -96,8 +96,8 @@ fn gdi_advances(dc: isize, w: &[u16]) -> Option<Vec<f32>> {
 pub fn positions(f: &Font, text: &str) -> Rc<Vec<f32>> {
     let (face, weight) = family_face(f);
     let px = f.size() as i32;
-    let key = (face, px, weight, text.to_string());
-    if let Some(v) = POSITIONS.with(|m| m.borrow().get(&key).cloned()) {
+    let key = (face, px, weight);
+    if let Some(v) = POSITIONS.with(|m| m.borrow().1.get(&key).and_then(|t| t.get(text)).cloned()) {
         return v;
     }
     let mut out = Vec::with_capacity(text.len() + 1);
@@ -137,10 +137,12 @@ pub fn positions(f: &Font, text: &str) -> Rc<Vec<f32>> {
     let v = Rc::new(out);
     POSITIONS.with(|m| {
         let mut m = m.borrow_mut();
-        if m.len() > 50_000 {
-            m.clear();
+        if m.0 > 50_000 {
+            m.0 = 0;
+            m.1.clear();
         }
-        m.insert(key, v.clone());
+        m.0 += 1;
+        m.1.entry(key).or_default().insert(text.to_string(), v.clone());
     });
     v
 }
@@ -391,7 +393,7 @@ pub fn text(ui: &Ui, painter: &egui::Painter, top_left: Pos2, s: &str, f: &Font,
 
 /// A wrapped paragraph like a Tk Label with wraplength; returns its height.
 pub fn paragraph(ui: &Ui, painter: Option<&egui::Painter>, top_left: Pos2, s: &str, f: &Font, color: Color32, wrap: f32) -> f32 {
-    let lines = wrap_lines(ui, f, s, wrap);
+    let lines = wrap_lines(f, s, wrap);
     if let Some(p) = painter {
         for (i, line) in lines.iter().enumerate() {
             text(ui, p, top_left + Vec2::new(0.0, i as f32 * f.m.linespace), line, f, color);
@@ -401,26 +403,40 @@ pub fn paragraph(ui: &Ui, painter: Option<&egui::Painter>, top_left: Pos2, s: &s
 }
 
 /// Break `s` into lines no wider than `wrap` (on spaces, like Tk's wraplength).
-pub fn wrap_lines(_ui: &Ui, f: &Font, s: &str, wrap: f32) -> Vec<String> {
-    wrap_lines_measure(f, s, wrap)
-}
-
-pub fn wrap_lines_measure(f: &Font, s: &str, wrap: f32) -> Vec<String> {
+pub fn wrap_lines(f: &Font, s: &str, wrap: f32) -> Vec<String> {
     let mut out = Vec::new();
     for para in s.split('\n') {
-        let mut line = String::new();
+        // byte offset of each character (and the end), and the x of each one: a line from
+        // character a to b is `pos[b] - pos[a]` wide, so no trial strings are measured
+        let at: Vec<usize> = para.char_indices().map(|(b, _)| b).chain([para.len()]).collect();
+        let pos = positions(f, para);
+        let (mut start, mut prev_end, mut c) = (0, 0, 0);
         for word in para.split(' ') {
-            let trial = if line.is_empty() { word.to_string() } else { format!("{line} {word}") };
-            if !line.is_empty() && measure(f, &trial) > wrap {
-                out.push(std::mem::take(&mut line));
-                line = word.to_string();
-            } else {
-                line = trial;
+            let (ws, we) = (c, c + word.chars().count());
+            c = we + 1;
+            if prev_end > start && pos[we] - pos[start] > wrap {
+                out.push(para[at[start]..at[prev_end]].to_string());
+                start = ws;
             }
+            prev_end = we;
         }
-        out.push(line);
+        out.push(para[at[start]..at[prev_end]].to_string());
     }
     out
+}
+
+/// The characters `[a, b)` of the space-separated word at character `k` (double-click selection).
+pub fn word_span(s: &str, k: usize) -> (usize, usize) {
+    let chars: Vec<char> = s.chars().collect();
+    let k = k.min(chars.len());
+    let (mut a, mut b) = (k, k);
+    while a > 0 && chars[a - 1] != ' ' {
+        a -= 1;
+    }
+    while b < chars.len() && chars[b] != ' ' {
+        b += 1;
+    }
+    (a, b)
 }
 
 pub fn radius(r: f32) -> CornerRadius {
@@ -605,6 +621,16 @@ impl Tips {
         }
     }
 
+    /// `tip`, building the text only when the widget is hovered.
+    pub fn tip_with(&mut self, resp: &Response, delay_ms: u32, at: TipAt, text: impl FnOnce() -> String) {
+        if resp.clicked() || resp.secondary_clicked() {
+            self.suppressed = Some(resp.id);
+        }
+        if resp.hovered() {
+            self.tip(resp, &text(), delay_ms, at);
+        }
+    }
+
     /// Same as `tip`, for an area that isn't a widget (hovered decided by the caller).
     pub fn tip_area(&mut self, id: Id, hovered: bool, text: &str, delay_ms: u32, at: TipAt) {
         if hovered && !text.is_empty() {
@@ -684,8 +710,6 @@ impl Tips {
 pub struct Scroll {
     pub offset: f32,
     drag: Option<(f32, f32)>,
-    /// keep showing the end as content is added (Tk's `see end` when at the bottom)
-    pub at_bottom: bool,
 }
 
 impl Scroll {
@@ -772,13 +796,6 @@ pub fn hover_in(ui: &Ui, rect: Rect) -> bool {
         Some(p) => rect.contains(p) && ui.ctx().layer_id_at(p).is_none_or(|l| l.order == egui::Order::Background),
         None => false,
     }
-}
-
-pub fn anchor_text(ui: &Ui, painter: &egui::Painter, pos: Pos2, align: Align2, s: &str, f: &Font, color: Color32) -> Rect {
-    let w = measure(f, s);
-    let rect = align.anchor_size(pos, Vec2::new(w, f.m.linespace));
-    text(ui, painter, rect.min, s, f, color);
-    rect
 }
 
 #[cfg(test)]
