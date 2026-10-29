@@ -1389,7 +1389,7 @@ impl App {
         for ((t, texts), keys) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(texts).zip(keys) {
             for ((r, text), key) in t.rows.iter_mut().zip(texts).zip(keys) {
                 if let Some(k) = r.keys.get_mut(1) {
-                    *k = key; // the next sort sees how long ago it is now (rows don't jump meanwhile)
+                    *k = key;
                 }
                 if let Some(c) = r.cells.get_mut(1) {
                     if c.text != text {
@@ -1397,6 +1397,11 @@ impl App {
                         changed = true;
                     }
                 }
+            }
+        }
+        for t in [&mut self.spots_tree, &mut self.done_tree] {
+            if t.sort.0 == 1 {
+                t.sort_rows(); // sorted by Heard: keep the order current as the times tick
             }
         }
         if changed {
