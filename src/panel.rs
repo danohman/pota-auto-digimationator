@@ -1193,13 +1193,10 @@ impl Panel {
         let mut on = enabled(app, i);
         l.switch_row(&format!("Log each QSO to {}", name(i)), "Off by default", &mut on, true, 0.0);
         let (mut h, mut port) = bufs[i].clone();
-        let net = i == 0 || KINDS[i - 1].uses_network();
-        if net {
-            l.form(&mut [("Host", &mut h, 24.0, false), ("Port", &mut port, 8.0, false)], 6.0, false);
-        }
+        l.form(&mut [("Host", &mut h, 24.0, false), ("Port", &mut port, 8.0, false)], 6.0, false);
         bufs[i] = (h.clone(), port.clone());
         let mut changed = on != enabled(app, i);
-        let valid = if net { port.trim().parse::<u16>().ok().filter(|n| *n >= 1).filter(|_| !h.trim().is_empty()) } else { Some(0) };
+        let valid = port.trim().parse::<u16>().ok().filter(|n| *n >= 1).filter(|_| !h.trim().is_empty());
         if i == 0 {
             app.s.aclog_enabled = on;
             if let Some(n) = valid {
@@ -1211,7 +1208,7 @@ impl Panel {
             let kind = KINDS[i - 1];
             let mut c = app.s.logger(kind);
             c.enabled = on;
-            if let Some(n) = valid.filter(|_| net) {
+            if let Some(n) = valid {
                 c.host = h.trim().to_string();
                 c.port = n;
             }

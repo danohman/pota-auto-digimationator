@@ -5,7 +5,6 @@
 
 mod aclog;
 mod loggers;
-mod logger32;
 mod app;
 mod cat;
 mod comports;

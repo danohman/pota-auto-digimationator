@@ -779,7 +779,7 @@ impl Wizard {
                         for k in crate::loggers::KINDS {
                             let c = s.logger(k);
                             if c.enabled {
-                                others.push(if k.uses_network() { format!("{} ({}:{})", k.name(), c.host, c.port) } else { k.name().to_string() });
+                                others.push(format!("{} ({}:{})", k.name(), c.host, c.port));
                             }
                         }
                         let to = if others.is_empty() { "no other logger".to_string() } else { others.join(", ") };
