@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Update check against the latest GitHub release, and the download / swap / relaunch.
-//!
-//! The repository is private for now, so an anonymous request gets a 404; an optional
-//! GitHub token (settings.json `github_token`) lets it read the release anyway. Once the
-//! repository is public no token is needed.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};

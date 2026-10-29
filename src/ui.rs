@@ -148,7 +148,7 @@ pub fn positions(f: &Font, text: &str) -> Rc<Vec<f32>> {
 /// Draw `lines` with GDI (hinted, ClearType) onto an opaque `bg` box of `size` physical
 /// pixels, each line at `origin` + i × `line_h`. egui's unhinted grayscale glyphs look
 /// smeared at tooltip sizes (user noticed); this is how Windows and Tk draw text. Only
-/// for opaque backgrounds: ClearType needs to know the colour behind it.
+/// for opaque backgrounds: ClearType needs to know the color behind it.
 pub fn gdi_text_image(f: &Font, scale: f32, lines: &[&str], fg: Color32, bg: Color32, size: [usize; 2], origin: Vec2, line_h: f32) -> Option<egui::ColorImage> {
     use windows_sys::Win32::Graphics::Gdi::{
         CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject, GdiFlush, SelectObject, SetBkMode, SetTextColor,
@@ -229,7 +229,7 @@ const RUN_MARGIN: i32 = 3;
 
 /// Draw `s` with GDI (hinted, ClearType) onto `bg`, as Windows and Tk draw text. Pixels
 /// left at exactly `bg` come out transparent, so a run never paints a box over its
-/// neighbours. `None` when the font lacks a glyph of `s`.
+/// neighbors. `None` when the font lacks a glyph of `s`.
 fn render_run(f: &Font, s: &str, scale: f32, fg: Color32, bg: Color32) -> Option<egui::ColorImage> {
     use windows_sys::Win32::Graphics::Gdi::{
         CreateDIBSection, DeleteObject, GdiFlush, SelectObject, SetBkMode, SetTextColor, TextOutW, BITMAPINFO, BITMAPINFOHEADER, BI_RGB,
@@ -282,9 +282,9 @@ fn render_run(f: &Font, s: &str, scale: f32, fg: Color32, bg: Color32) -> Option
     }
 }
 
-/// Like `text`, but drawn by GDI with ClearType onto `bg`, the solid colour behind the
+/// Like `text`, but drawn by GDI with ClearType onto `bg`, the solid color behind the
 /// text (it must be what is really there: ClearType blends into it). Widths and
-/// positions are the same as `text`'s. Each (text, font, colours) run is drawn once and
+/// positions are the same as `text`'s. Each (text, font, colors) run is drawn once and
 /// kept as a texture; runs not drawn for a while are dropped.
 pub fn text_on(ui: &Ui, painter: &egui::Painter, top_left: Pos2, s: &str, f: &Font, color: Color32, bg: Color32) -> f32 {
     if s.is_empty() {
@@ -304,7 +304,7 @@ pub fn text_on(ui: &Ui, painter: &egui::Painter, top_left: Pos2, s: &str, f: &Fo
         let mut m = m.borrow_mut();
         if !m.contains_key(&key) {
             if m.len() > 3000 {
-                // drop runs not drawn in the last ~600 passes (scrolled away, old glow colours)
+                // drop runs not drawn in the last ~600 passes (scrolled away, old glow colors)
                 m.retain(|_, r| r.as_ref().is_some_and(|r| r.last + 600 > pass));
                 if m.len() > 3000 {
                     m.clear();
@@ -427,7 +427,7 @@ pub fn radius(r: f32) -> CornerRadius {
     CornerRadius::same(r.round().clamp(0.0, 255.0) as u8)
 }
 
-/// A rounded box with optically centred text. With a click
+/// A rounded box with optically centered text. With a click
 /// handler it is a button.
 #[derive(Clone)]
 pub struct Rnd<'a> {
@@ -442,7 +442,7 @@ pub struct Rnd<'a> {
     pub radius: Option<f32>,
     /// a status light before the text
     pub dot: Option<Color32>,
-    /// false centres the line box instead of the capitals (icon glyphs)
+    /// false centers the line box instead of the capitals (icon glyphs)
     pub cap: bool,
     /// the narrowest the box gets
     pub size_text: &'a str,
@@ -785,7 +785,7 @@ pub fn anchor_text(ui: &Ui, painter: &egui::Painter, pos: Pos2, align: Align2, s
 mod tests {
     use super::*;
 
-    /// Cost of drawing runs with GDI, as a pulsing row does every frame (a new colour
+    /// Cost of drawing runs with GDI, as a pulsing row does every frame (a new color
     /// each time). `cargo test --release -- --ignored run_render_cost --nocapture`
     #[test]
     #[ignore]

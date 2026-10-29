@@ -115,7 +115,7 @@ impl TextSelect {
             }
             let (a, b) = if before(b, a) { (b, a) } else { (a, b) };
             let mut seen = HashSet::new();
-            let mut parts: Vec<(f32, f32, f32, String)> = Vec::new(); // centre y, x, width, text
+            let mut parts: Vec<(f32, f32, f32, String)> = Vec::new(); // center y, x, width, text
             let region = self.region.map(|r| r.expand(1.0));
             for run in runs.iter().filter(|r| r.layer == layer && region.is_none_or(|g| g.contains_rect(r.clip))) {
                 if !seen.insert((run.x.round() as i32, run.y.round() as i32, run.text.as_str())) {

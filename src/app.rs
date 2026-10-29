@@ -68,7 +68,7 @@ pub enum Radio {
 }
 
 impl Radio {
-    /// label, pulse period (s), dark and bright colour
+    /// label, pulse period (s), dark and bright color
     fn spec(self) -> (&'static str, f64, (u8, u8, u8), (u8, u8, u8)) {
         match self {
             Radio::Tx => ("TRANSMITTING", 1.2, (0x8a, 0x10, 0x10), (0xF0, 0x3a, 0x3a)),
@@ -237,7 +237,7 @@ struct StaticLine {
     link: bool,
     /// a button after the text: (label, enabled, what a click does)
     button: Option<(String, bool, StaticClick)>,
-    /// drawn in the error colour (a failed sign-in or fetch)
+    /// drawn in the error color (a failed sign-in or fetch)
     bad: bool,
 }
 
@@ -914,7 +914,7 @@ impl App {
         self.p = Palette::for_name(self.theme_name);
         self.style_egui(ctx);
         self.titled_dark = None;
-        self.spots_key = None; // rebuild the lists with the new row colours
+        self.spots_key = None; // rebuild the lists with the new row colors
         self.refresh_spots_list();
         self.render_worked();
     }
@@ -2067,7 +2067,7 @@ impl App {
         let minimized = ctx.input(|i| i.viewport().minimized) == Some(true);
         let total = self.panes.last;
         if !self.panes.placed || minimized || total.y < 300.0 || total.x < 600.0 {
-            return; // not laid out (or minimised): the numbers would be junk
+            return; // not laid out (or minimized): the numbers would be junk
         }
         let right_w = (total.x - self.panes.left).round();
         if !(200.0 < right_w && right_w < total.x - 200.0) {
@@ -2387,7 +2387,7 @@ impl App {
         painter.rect_stroke(rect, ui::radius(CARD_RADIUS), Stroke::new(1.0, self.p.border), StrokeKind::Inside);
     }
 
-    /// A card with a header band in its own colour behind the title row (height `hc`);
+    /// A card with a header band in its own color behind the title row (height `hc`);
     /// returns the row's top.
     fn card_head(&mut self, ui: &mut Ui, card: Card, rect: Rect, hc: f32) -> f32 {
         self.card(ui, rect);
@@ -2415,7 +2415,7 @@ impl App {
     /// A card's title (ttk label padding 2) at the head's content origin; returns its right edge.
     fn card_title(&self, ui: &Ui, x: f32, y: f32, h: f32, title: &str) -> f32 {
         let f = &self.f;
-        // centre the capitals (not the line box, whose descent is deeper than its ascent)
+        // center the capitals (not the line box, whose descent is deeper than its ascent)
         let cap = f.heading.size() * ui::CAP_HEIGHT;
         let top = y + (h / 2.0 - (f.heading.m.ascent - cap / 2.0)).round();
         let w = ui::text(ui, ui.painter(), Pos2::new(x + 2.0, top), title, &f.heading, self.p.text);
@@ -2769,7 +2769,7 @@ impl App {
             };
             let n = len(i);
             let (s, e) = (s.min(n), e.min(n).max(s.min(n)));
-            // timestamp, in the log's colour; highlighted when the selection takes in the line start
+            // timestamp, in the log's color; highlighted when the selection takes in the line start
             if !line.ts.is_empty() {
                 let in_range = matches!(range, Some(((si, _), (ei, _))) if i >= si && i <= ei);
                 let ts_sel = in_range && s == 0;
@@ -2939,7 +2939,7 @@ impl App {
         }
     }
 
-    /// The centred "waiting" / "No spots found" overlay over a spot list.
+    /// The centered "waiting" / "No spots found" overlay over a spot list.
     fn list_overlay(&mut self, ui: &mut Ui, rect: Rect, text: &str, spin: bool) {
         let (p, f) = (self.p.clone(), self.f.clone());
         let lw = measure(&f.heading, text) + 2.0;
@@ -2973,7 +2973,7 @@ impl App {
         painter.add(egui::Shape::line(pts, Stroke::new(7.0, self.p.accent)));
     }
 
-    /// The "Waiting for WSJT-X" popup: a card centred in the window, shown from start-up
+    /// The "Waiting for WSJT-X" popup: a card centered in the window, shown from start-up
     /// until WSJT-X's first Status, then never again. It can't be dismissed and blocks the
     /// cards (user request), but not the header: Settings, the update check and the theme
     /// button keep working (user request 2026-10-28); the Auto toggles are refused.
@@ -3157,7 +3157,7 @@ impl App {
 
     /// Stack a column's visible sections: Current Info and the new-parks card take the
     /// height their lines need, the others share the rest by their weights. Returns the
-    /// rectangles and the dividers between neighbouring shared sections (card above, card
+    /// rectangles and the dividers between neighboring shared sections (card above, card
     /// below, divider rectangle, the column's spare height, the sum of the weights).
     #[allow(clippy::type_complexity)]
     fn stack_column(&mut self, ui: &Ui, cards: &[Card], x: f32, w: f32, top: f32, bottom: f32) -> (Vec<(Card, Rect)>, Vec<(Card, Card, Rect, f32, f32)>) {
@@ -3240,7 +3240,7 @@ impl App {
             placed.extend(r);
             sashes.extend(s);
         }
-        // dividers: between the columns, and between neighbouring shared sections
+        // dividers: between the columns, and between neighboring shared sections
         if !e0 && !e1 {
             let r = Rect::from_min_size(Pos2::new(area.left() + left_w, area.top()), Vec2::new(10.0, total.y));
             let resp = ui.interact(r, Id::unique("sash-cols"), Sense::drag());

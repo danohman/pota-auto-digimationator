@@ -68,7 +68,7 @@ pub struct Cell {
     /// after the text, outside the link, with an optional hover hint
     pub suffix: Option<(String, Option<String>)>,
     pub lead: Option<Lead>,
-    /// a faint red text colour (old spots' Ago)
+    /// a faint red text color (old spots' Ago)
     pub stale: bool,
 }
 
@@ -123,7 +123,7 @@ pub struct Row {
     pub keys: Vec<SortKey>,
 }
 
-/// Colours that change every frame (pulsing rows).
+/// Colors that change every frame (pulsing rows).
 pub struct RowColors {
     pub target: Color32,
     pub heard: Color32,
@@ -259,7 +259,7 @@ impl Table {
         f.table_heading.m.linespace + Self::nudge(f)
     }
 
-    /// Line height and the text's top offset for a row (Tk centres the text when an
+    /// Line height and the text's top offset for a row (Tk centers the text when an
     /// embedded chip makes the line taller).
     fn line_metrics(&self, f: &Fonts, row: &Row) -> (f32, f32, f32) {
         let mut chunks = vec![Chunk { asc: f.ui.m.ascent, desc: f.ui.m.descent }];

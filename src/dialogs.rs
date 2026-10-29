@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! The modal windows: the enable confirmation and the "Are you still there?" pair.
-//! Each is a real window (an egui viewport) with a title bar, centred over the app.
+//! Each is a real window (an egui viewport) with a title bar, centered over the app.
 
 use eframe::egui::{self, Color32, Id, Key, Pos2, Rect, Stroke, Ui, Vec2, ViewportBuilder, ViewportId};
 
@@ -168,7 +168,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
     h += extra_h + btn_gap + btn_h;
     let size = Vec2::new(w + 48.0, h + 40.0);
     if d.pos.is_none() {
-        // centre it over the app window (a third of the way down)
+        // center it over the app window (a third of the way down)
         let main = ctx.input(|i| i.viewport().inner_rect).unwrap_or(Rect::from_min_size(Pos2::ZERO, Vec2::new(1600.0, 800.0)));
         d.pos = Some(Pos2::new((main.left() + (main.width() - size.x) / 2.0).max(0.0).round(),
                                (main.top() + (main.height() - size.y) / 3.0).max(0.0).round()));

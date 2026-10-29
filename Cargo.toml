@@ -1,6 +1,6 @@
 [package]
 name = "pota-auto-digimationator"
-version = "1.0.2"
+version = "1.0.3-beta"
 edition = "2024"
 description = "Calls Parks on the Air activators through WSJT-X"
 license = "GPL-3.0-or-later"

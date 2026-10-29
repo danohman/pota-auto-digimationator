@@ -98,7 +98,7 @@ The worked list is loaded at startup from today's entries in WSJT-X's log (`wsjt
 
 ### How it picks and calls
 
-- When several candidates decode in the same cycle, it calls the one with the **strongest SNR**. If nothing is worth calling, the log shows one grey line such as `38 calls decoded, no needed POTA`.
+- When several candidates decode in the same cycle, it calls the one with the **strongest SNR**. If nothing is worth calling, the log shows one gray line such as `38 calls decoded, no needed POTA`.
 - It **never calls while WSJT-X has Tx enabled**, so it won't interrupt a QSO or your own CQ. A QSO in progress is never overridden.
 - You can always call a candidate yourself with its **Call now** button, even with Auto-Hunt disabled or in Dry run.
 - Each call is sent as a Reply, exactly as a double-click on the decode line would.
