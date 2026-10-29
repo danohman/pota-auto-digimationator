@@ -792,11 +792,11 @@ impl App {
                 dialogs::Outcome::Enable => match d.kind {
                     DialogKind::ConfirmHunt => self.set_hunting(true),
                     DialogKind::ConfirmCq => self.set_cq(true),
+                    DialogKind::UpdateAvail(_) => self.start_update(),
                     _ => {}
                 },
                 dialogs::Outcome::StillHere => {
                     self.presence.arm();
-                    DialogKind::UpdateAvail(_) => self.start_update(),
                     self.log("Presence confirmed; Auto modes stay on.", Tag::Hunt);
                 }
                 dialogs::Outcome::Expired => self.presence_expired(),
@@ -854,7 +854,9 @@ impl App {
 
     // --- Rig receive settings (Yaesu over the COM port) ----------------------------------
 
-    /// ATT, NB and NR off on the main receiver (the radio may remember them per band).
+    /// ATT, NB, NR off and the Tx power set on the main receiver (the radio may
+    /// remember them per band). The first pass after a start or QSY also reads what the
+    /// radio had, so it can be put back; the quiet second pass only repeats the settings.
     fn rig_clean(&mut self, quiet: bool) {
         let wants = crate::cat::Wants { clean: self.s.rig_clean, power: self.s.rig_power };
         if !(wants.clean || wants.power.is_some()) {
@@ -868,14 +870,14 @@ impl App {
         if let Some(w) = wants.power {
             parts.push(format!("PWR {w} W"));
         }
+        let fresh = !quiet && self.s.rig_restore;
+        self.rig.apply(wants, fresh, false, &parts.join(", "), quiet);
     }
 
     fn rig_watch(&mut self) {
         let (Some(band), mode) = (self.h.band(), self.h.mode()) else { return };
         if mode.is_empty() {
             return;
-        let fresh = !quiet && self.s.rig_restore;
-        self.rig.apply(wants, fresh, false, &parts.join(", "), quiet);
         }
         let key = (band.to_string(), mode);
         if self.rig_key.as_ref() == Some(&key) {
@@ -1250,11 +1252,11 @@ impl App {
                 self.update_busy = false;
                 match r {
                     Ok(Some(rel)) => {
+                        self.update_ok = true;
+                        self.update_note = None;
                         if manual && self.dialog.is_none() {
                             self.dialog = Some(Dialog::new(DialogKind::UpdateAvail(rel.version.clone())));
                         }
-                        self.update_ok = true;
-                        self.update_note = None;
                         self.update = Some(rel);
                     }
                     Ok(None) => {
@@ -1465,6 +1467,8 @@ impl App {
             return;
         }
         let mut steps: Vec<(String, String)> = vec![]; // mode first: it retunes on the current band
+        // a newer request replaces any pending check, or it would blame a mode the user has already left
+        self.timers.retain(|(_, t)| !matches!(t, Timer::CheckMode(_)));
         if let Some(m) = mode.filter(|m| *m != self.h.mode()) {
             self.log(&format!("Switching WSJT-X to {m}"), Tag::Info);
             steps.push(("mode".into(), m.clone()));
@@ -1478,8 +1482,6 @@ impl App {
         }
         if steps.is_empty() {
             return;
-        // a newer request replaces any pending check, or it would blame a mode the user has already left
-        self.timers.retain(|(_, t)| !matches!(t, Timer::CheckMode(_)));
         }
         // Press WSJT-X's band/mode buttons in order on a worker thread (PowerShell takes a
         // second each); first put the radio back as it was before we changed it.
@@ -1992,11 +1994,11 @@ impl App {
                 remove.push(b.id); // no QSO in progress: no Halt Tx / Keep calling button
                 continue;
             }
-            if b.label == "Skip" && h.has_answered(a) {
-                remove.push(b.id); // they answered us: no point skipping them any more
             if b.label == "Keep calling" {
                 continue; // stays green, never glows
             }
+            if b.label == "Skip" && h.has_answered(a) {
+                remove.push(b.id); // they answered us: no point skipping them any more
                 continue;
             }
             if b.used {
@@ -3094,19 +3096,21 @@ impl App {
                 _ => "",
             };
             let head = format!("{}  \u{b7}  {where_}{}", d.call, if status.is_empty() { String::new() } else { format!("  \u{b7}  {status}") });
-            let items = vec![
-                Item::Heading(head),
-                Item::Row {
-                    label: format!("Skip {name}"),
-                    cmd: (!d.skipped).then(|| MenuCmd::Skip { call: d.call.clone(), ref_: d.ref_.clone() }),
-                    subtitle: if d.skipped { "Already skipped".into() } else { "Not today on this band, mode and park; stops Tx if calling them".into() },
-                },
+            // only the choice that applies: Skip, or Unskip when already skipped
+            let row = if d.skipped {
                 Item::Row {
                     label: format!("Unskip {name}"),
-                    cmd: d.skipped.then(|| MenuCmd::Unskip { call: d.call.clone(), ref_: d.ref_.clone() }),
-                    subtitle: if d.skipped { "Allow calls to them again today".into() } else { "Not skipped".into() },
-                },
-            ];
+                    cmd: Some(MenuCmd::Unskip { call: d.call.clone(), ref_: d.ref_.clone() }),
+                    subtitle: "Allow calls to them again today".into(),
+                }
+            } else {
+                Item::Row {
+                    label: format!("Skip {name}"),
+                    cmd: Some(MenuCmd::Skip { call: d.call.clone(), ref_: d.ref_.clone() }),
+                    subtitle: "Not today on this band, mode and park; stops Tx if calling them".into(),
+                }
+            };
+            let items = vec![Item::Heading(head), row];
             self.popup = Some(PopupMenu::new(items, pos, self.now()));
             self.popup_in = self.in_pop;
         }
@@ -3657,13 +3661,13 @@ impl eframe::App for App {
             }
             self.wizard_frame(&ctx, ui);
             self.draw_dialog(&ctx, ctx.content_rect());
+            // drag over the wizard's text to select it, Ctrl+C copies it
+            let select = self.p.select;
+            self.tsel.end_frame(&ctx, Color32::from_rgba_unmultiplied(select.r(), select.g(), select.b(), 120));
             ctx.request_repaint_after(Duration::from_millis(100));
             return;
         }
         while let Ok(e) = self.rx.try_recv() {
-            // drag over the wizard's text to select it, Ctrl+C copies it
-            let select = self.p.select;
-            self.tsel.end_frame(&ctx, Color32::from_rgba_unmultiplied(select.r(), select.g(), select.b(), 120));
             self.dispatch(e, &ctx);
         }
         self.drain_hunter();
