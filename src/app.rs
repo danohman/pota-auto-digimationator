@@ -1737,7 +1737,7 @@ impl App {
             self.done_count = "0".into();
             self.spots_title = SPOTS_TITLE.into();
             self.done_title = DONE_TITLE.into();
-            // waiting for WSJT-X has its own popup (draw_wsjtx_wait); the list only waits
+            // waiting for WSJT-X has its own popup (the big spinner in the Activity card); the list only waits
             // for pota.app
             self.waiting = (if self.h.spots.is_none() { "Waiting for pota.app...".into() } else { String::new() }, true);
             return;
@@ -2525,6 +2525,9 @@ impl App {
         let mut tips = std::mem::take(&mut self.tips);
         let click = self.log.show(ui, body, &p, &f, &mut tips);
         self.tips = tips;
+        if !self.wsjtx_seen && self.h.band().is_none() {
+            self.list_overlay(ui, rect, "Waiting for a WSJT-X decode...", true);
+        }
         if self.log.has_selection() {
             self.static_sel = None; // one selection at a time
         }
@@ -2973,12 +2976,10 @@ impl App {
         painter.add(egui::Shape::line(pts, Stroke::new(7.0, self.p.accent)));
     }
 
-    /// The "Waiting for WSJT-X" notice: a small banner at the bottom of the window, shown
-    /// from start-up until WSJT-X's first Status, then never again. It is informational
-    /// only (user request 2026-10-29): it blocks nothing, the cards, spots and header all
-    /// stay usable; only the Auto toggles are refused until WSJT-X has been heard.
-    /// Returns true while it is showing.
-    fn draw_wsjtx_wait(&mut self, ctx: &egui::Context, screen: Rect) -> bool {
+    /// True from start-up until WSJT-X's first Status, then never again (user request
+    /// 2026-10-29: informational only; the big spinner sits inside the Activity card and
+    /// blocks nothing, only the Auto toggles are refused until WSJT-X has been heard).
+    fn wsjtx_waiting(&mut self, ctx: &egui::Context) -> bool {
         if self.wsjtx_seen {
             return false;
         }
@@ -2986,33 +2987,6 @@ impl App {
             self.wsjtx_seen = true;
             return false;
         }
-        let (p, f) = (self.p.clone(), self.f.clone());
-        let text = format!("Waiting for a WSJT-X decode... (UDP Server {} port {}, Accept UDP requests ticked)", self.s.udp_group, self.s.udp_port);
-        let tw = measure(&f.ui, &text) + 2.0;
-        let size = Vec2::new(tw + 16.0 + 24.0 + 8.0 + 2.0, 32.0);
-        let rect = Rect::from_min_size(Pos2::new((screen.center().x - size.x / 2.0).round(), (screen.bottom() - PAD - size.y).round()), size);
-        egui::Area::new(Id::new("wsjtx-wait"))
-            .order(Order::Foreground)
-            .fixed_pos(rect.min)
-            .interactable(false)
-            .show(ctx, |ui| {
-                let painter = ui.painter().clone();
-                painter.rect_filled(rect, 0.0, p.border);
-                painter.rect_filled(rect.shrink(1.0), 0.0, p.surface);
-                let c = Pos2::new(rect.left() + 8.0 + 12.0, rect.center().y);
-                let r = 8.0;
-                painter.circle_stroke(c, r, Stroke::new(3.0, p.border));
-                let start = ((self.now() / 0.03) as f32 * -12.0).rem_euclid(360.0).to_radians();
-                let pts: Vec<Pos2> = (0..=20)
-                    .map(|i| {
-                        let a = start + 100f32.to_radians() * i as f32 / 20.0;
-                        Pos2::new(c.x + r * a.cos(), c.y - r * a.sin())
-                    })
-                    .collect();
-                painter.add(egui::Shape::line(pts, Stroke::new(3.0, p.accent)));
-                let y = (rect.center().y - f.ui.m.linespace / 2.0).round();
-                ui::text(ui, &painter, Pos2::new(rect.left() + 8.0 + 24.0 + 8.0, y), &text, &f.ui, p.muted);
-            });
         ctx.request_repaint_after(Duration::from_millis(40));
         true
     }
@@ -3699,7 +3673,7 @@ impl eframe::App for App {
         if area.width() > 20.0 && area.height() > 20.0 {
             self.draw_panes(ui, area);
         }
-        self.draw_wsjtx_wait(&ctx, screen); // (before the panel, so Settings opens on top of it)
+        self.wsjtx_waiting(&ctx);
         // the settings panel, popups and dialogs
         let mut panel = std::mem::take(&mut self.panel);
         panel.show(self, &ctx, ui);
