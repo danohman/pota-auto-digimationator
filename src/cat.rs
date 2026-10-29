@@ -641,7 +641,14 @@ impl RigClient {
         let Some(cfg) = self.cfg.lock().unwrap().clone() else { return };
         let Ok(mut p) = open(&cfg) else { return };
         let got: Vec<(Item, u32)> = items.iter().filter_map(|i| read_value(p.as_mut(), cfg.rig, *i).map(|v| (*i, norm(*i, v)))).collect();
-        *self.saved.lock().unwrap() = got;
+        // Keep what an earlier pass found: after a mode change the radio still holds our own
+        // cleaned values, and reading those would replace the originals.
+        let mut saved = self.saved.lock().unwrap();
+        for (i, v) in got {
+            if !saved.iter().any(|(s, _)| *s == i) {
+                saved.push((i, v));
+            }
+        }
     }
 
     /// Put back what `apply` found on the radio (once; nothing happens if nothing was saved).
