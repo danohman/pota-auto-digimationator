@@ -1569,6 +1569,18 @@ impl App {
         }
     }
 
+    /// A pulsing orange halo around an enabled Auto button: a few translucent rings of the
+    /// palette orange (`new`), fading outward, so it reads on both the light and dark header.
+    fn auto_glow(&self, ui: &Ui, r: Rect) {
+        let k = 0.5 + 0.5 * pulse(self.now(), 1.6) as f32;
+        let h = r.height();
+        for i in 1..=6 {
+            let grow = i as f32 * 1.5;
+            let a = k * 0.85 * (1.0 - (i as f32 - 1.0) / 6.0).powi(2);
+            ui.painter().rect_filled(r.expand(grow), (h + 2.0 * grow) / 2.0, self.p.new.gamma_multiply(a));
+        }
+    }
+
     fn cq_button(&self) -> (String, Color32, Color32) {
         let p = &self.p;
         if self.h.cq_enabled {
@@ -2130,6 +2142,9 @@ impl App {
         let hb = Rnd::new(&hunt_text, &f.toggle).pill().pad(10.0, 9.0).colors(hfill, Color32::WHITE).hover(hhover).min_text(&hunt_min);
         let sz = hb.size(ui);
         let r = Rect::from_min_size(Pos2::new(right - sz.x, center(sz.y)), sz);
+        if self.h.enabled {
+            self.auto_glow(ui, r);
+        }
         let resp = hb.show(ui, Id::unique("hunt-btn"), r, true);
         self.tips.tip(&resp, "Click to turn Auto-Hunt on or off", 500, TipAt::Below(r));
         if resp.clicked() && self.wsjtx_seen {
@@ -2139,6 +2154,9 @@ impl App {
         let cb = Rnd::new(&cq_text, &f.toggle).pill().pad(10.0, 9.0).colors(cfill, Color32::WHITE).hover(chover).min_text(&cq_min);
         let sz = cb.size(ui);
         let r = Rect::from_min_size(Pos2::new(right - sz.x, center(sz.y)), sz);
+        if self.h.cq_enabled {
+            self.auto_glow(ui, r);
+        }
         let resp = cb.show(ui, Id::unique("cq-btn"), r, true);
         self.tips.tip(&resp, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nAuto-Hunt has priority.", 500, TipAt::Below(r));
         if resp.clicked() && self.wsjtx_seen {
@@ -3649,7 +3667,8 @@ impl eframe::App for App {
         let busy = self.radio.is_some() || self.h.target().is_some() || !self.heard.is_empty()
             || self.notice_pulse.values().any(|u| *u > now)
             || (!self.waiting.0.is_empty() && self.waiting.1) || self.dialog.is_some()
-            || self.log.buttons_mut().any(|b| b.glowing);
+            || self.log.buttons_mut().any(|b| b.glowing)
+            || self.h.enabled || self.h.cq_enabled;
         ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 100 }));
     }
 
