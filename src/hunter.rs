@@ -1326,14 +1326,14 @@ impl Hunter {
             } else if !self.wsjtx_handling(&call) {
                 let so = sign_off(&d.message);
                 if !so.is_empty() {
-                    self.log(format!("{} sent you {so}  [{}]", p.call, shown(&d.message)), Tag::Skip);
+                    self.log(format!("{} sent you {so}", p.call), Tag::Skip);
                 } else if self.cq_enabled {
                     let now = self.now();
                     self.callers.push((d.clone(), call.clone(), now)); // chosen when the cycle settles
                 } else {
                     let btn = self.answer_button(d, &call);
-                    self.log_with(format!("{} is calling you, but you never called them; ignoring  [{}]",
-                        p.call, shown(&d.message)), Tag::Skip, btn, false);
+                    self.log_with(format!("{} is calling you, but you never called them; ignoring ({:+} dB at {} Hz)",
+                        p.call, d.snr, d.df), Tag::Skip, btn, false);
                 }
             }
             return;
@@ -1364,7 +1364,7 @@ impl Hunter {
         let mut reason = if is_pota_cq {
             "CQ POTA".to_string()
         } else if !spots.is_empty() {
-            "spotted on pota.app".to_string()
+            String::new()
         } else {
             return;
         };
@@ -1422,11 +1422,7 @@ impl Hunter {
         // "KD5QJQ (RR73) (-7 dB) at US-1091 (Lake Dardanelle State Park)"; (RR73) only for
         // sign-offs; only reasons other than a plain spot ("CQ POTA", "new park ...")
         // are spelled out.
-        let extra = reason
-            .strip_prefix("spotted on pota.app")
-            .unwrap_or(&reason)
-            .to_string();
-        let extra = extra.strip_prefix("CQ POTA").unwrap_or(&extra).trim_start_matches([',', ' ']).to_string();
+        let extra = reason.strip_prefix("CQ POTA").unwrap_or(&reason).trim_start_matches([',', ' ']).to_string();
         let mut at = if !shown_ref.is_empty() && !shown_park.is_empty() {
             format!(" at {shown_ref} ({shown_park})")
         } else if !where_.is_empty() {
@@ -1850,7 +1846,9 @@ impl Hunter {
             }
         }
         let best = best.clone();
-        let label = format!("{}  ({:+} dB at {} Hz, {})", best.call, best.decode.snr, best.decode.df, best.reason);
+        let why = best.reason.trim_start_matches([',', ' ']);
+        let why = if why.is_empty() { String::new() } else { format!(", {why}") };
+        let label = format!("{}  ({:+} dB at {} Hz{why})", best.call, best.decode.snr, best.decode.df);
         if self.busy() {
             self.log(format!("Busy (in QSO); not calling {}", best.call), Tag::Skip);
             return false;

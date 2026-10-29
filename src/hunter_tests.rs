@@ -1234,7 +1234,7 @@ fn logged_messages_have_no_padding_but_reply_is_raw() {
     let mut s = T::new();
     let raw = "WD4DAN AK7W DM42                      a2";
     s.hd(dec(raw));
-    assert!(s.logs.last().unwrap().1.contains("[WD4DAN AK7W DM42 a2]"));
+    assert!(s.logs.last().unwrap().1.contains("AK7W is calling you"));
     let a = s.actions.last().unwrap().clone();
     s.click(&a);
     assert_eq!(s.replies().last().unwrap(), raw);
@@ -1304,7 +1304,7 @@ fn no_answer_button_for_sign_offs() {
     s.hd(dec("WD4DAN K7ABC RR73"));
     assert!(s.actions.is_empty());
     let last: Vec<_> = s.logs[s.logs.len() - 2..].iter().map(|(_, t)| t.clone()).collect();
-    assert_eq!(last, ["N6NXV sent you 73  [WD4DAN N6NXV 73]", "K7ABC sent you RR73  [WD4DAN K7ABC RR73]"]);
+    assert_eq!(last, ["N6NXV sent you 73", "K7ABC sent you RR73"]);
     s.hd(dec("WD4DAN W1RRR RRR"));
     assert_eq!(s.actions.len(), 1);
 }
