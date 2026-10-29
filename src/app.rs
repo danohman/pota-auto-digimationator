@@ -652,22 +652,16 @@ impl App {
         self.render_worked();
     }
 
-    /// The GitHub token for reading a private repository's releases (settings.json
-    /// `github_token`, no UI), or None.
-    fn github_token(&self) -> Option<String> {
-        self.s.extra.get("github_token").and_then(|v| v.as_str()).map(str::trim).filter(|t| !t.is_empty()).map(str::to_string)
-    }
-
     /// Look for a newer release on a thread; `manual` = the user asked (say so when up to date).
     pub fn check_update(&mut self, manual: bool) {
         if self.update_busy {
             return;
         }
         self.update_busy = true;
-        let (post, token) = (self.post.clone(), self.github_token());
+        let post = self.post.clone();
         std::thread::Builder::new()
             .name("update-check".into())
-            .spawn(move || post(Event::UpdateCheck(crate::update::check(token.as_deref()), manual)))
+            .spawn(move || post(Event::UpdateCheck(crate::update::check(), manual)))
             .ok();
     }
 
@@ -683,10 +677,10 @@ impl App {
         }
         self.update_busy = true;
         self.update_note = Some((format!("Downloading version {}...", rel.version), false));
-        let (post, token) = (self.post.clone(), self.github_token());
+        let post = self.post.clone();
         std::thread::Builder::new()
             .name("update-install".into())
-            .spawn(move || post(Event::UpdateDone(crate::update::install(&rel, token.as_deref()))))
+            .spawn(move || post(Event::UpdateDone(crate::update::install(&rel))))
             .ok();
     }
 
@@ -877,6 +871,9 @@ impl App {
         if !first {
             self.log.clear(); // new band/mode: start the Activity log afresh
             self.static_rig.clear(); // until the rig has been set on the new band
+            // Heard times from before the change say nothing about the new band/mode.
+            self.last_heard.clear();
+            self.refresh_heard_cells();
         }
         if !first && (self.s.rig_clean || self.s.rig_power.is_some()) {
             // Let the radio finish changing band before sending, and once more in case
@@ -3503,7 +3500,7 @@ impl App {
                     self.refresh_spots_list();
                 }
                 "update" => {
-                    let a = |n: &str| crate::update::Asset { name: n.into(), api_url: String::new(), browser_url: String::new() };
+                    let a = |n: &str| crate::update::Asset { name: n.into(), browser_url: String::new() };
                     self.update = Some(crate::update::Release { version: "9.9.9".into(), page: String::new(), exe: a("pota-auto-digimationator.exe"), exe_sha: None });
                 }
                 "hunt" => self.set_hunting(true),

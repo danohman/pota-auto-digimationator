@@ -22,8 +22,6 @@ const MAX_BYTES: u64 = 200 * 1024 * 1024;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Asset {
     pub name: String,
-    /// API url (needs `Accept: application/octet-stream`; the only one that works while private)
-    pub api_url: String,
     pub browser_url: String,
 }
 
@@ -70,7 +68,6 @@ pub fn is_newer(latest: &str, current: &str) -> bool {
 fn asset_of(v: &Value) -> Option<Asset> {
     Some(Asset {
         name: v.get("name")?.as_str()?.to_string(),
-        api_url: v.get("url")?.as_str()?.to_string(),
         browser_url: v.get("browser_download_url").and_then(Value::as_str).unwrap_or_default().to_string(),
     })
 }
@@ -90,44 +87,26 @@ pub fn parse_release(json: &str) -> Result<Release, String> {
     })
 }
 
-fn get(url: &str, token: Option<&str>, accept: &str, redirects: u32) -> Result<ureq::Response, String> {
-    let agent = ureq::AgentBuilder::new().redirects(redirects).timeout(Duration::from_secs(60)).build();
-    let mut req = agent.get(url).set("User-Agent", USER_AGENT).set("Accept", accept);
-    if let Some(t) = token.filter(|t| !t.is_empty()) {
-        req = req.set("Authorization", &format!("Bearer {t}"));
-    }
-    match req.call() {
+fn get(url: &str, accept: &str) -> Result<ureq::Response, String> {
+    let agent = ureq::AgentBuilder::new().redirects(5).timeout(Duration::from_secs(60)).build();
+    match agent.get(url).set("User-Agent", USER_AGENT).set("Accept", accept).call() {
         Ok(r) => Ok(r),
-        // a redirect we asked not to follow comes back as a normal response
-        Err(ureq::Error::Status(code, r)) if (300..400).contains(&code) => Ok(r),
-        Err(ureq::Error::Status(404, _)) if token.is_none_or(str::is_empty) => {
-            Err("GitHub says not found (the repository is private; set github_token in settings.json, or wait until it is public)".into())
-        }
         Err(ureq::Error::Status(code, r)) => Err(format!("GitHub answered {code} {}", r.status_text())),
         Err(e) => Err(e.to_string()),
     }
 }
 
 /// Is there a release newer than this build? Ok(None) = up to date.
-pub fn check(token: Option<&str>) -> Result<Option<Release>, String> {
+pub fn check() -> Result<Option<Release>, String> {
     let url = format!("https://api.github.com/repos/{REPO}/releases/latest");
-    let body = get(&url, token, "application/vnd.github+json", 5)?.into_string().map_err(|e| e.to_string())?;
+    let body = get(&url, "application/vnd.github+json")?.into_string().map_err(|e| e.to_string())?;
     let rel = parse_release(&body)?;
     Ok(is_newer(&rel.version, env!("CARGO_PKG_VERSION")).then_some(rel))
 }
 
-/// The bytes of a release asset. With a token the API url is used (the only one a private
-/// repository serves), and its redirect to the storage host is followed without the token.
-fn fetch(a: &Asset, token: Option<&str>) -> Result<Vec<u8>, String> {
-    let resp = if token.is_some_and(|t| !t.is_empty()) {
-        let r = get(&a.api_url, token, "application/octet-stream", 0)?;
-        match r.header("Location") {
-            Some(loc) if (300..400).contains(&r.status()) => get(loc, None, "application/octet-stream", 5)?,
-            _ => r,
-        }
-    } else {
-        get(&a.browser_url, None, "application/octet-stream", 5)?
-    };
+/// The bytes of a release asset.
+fn fetch(a: &Asset) -> Result<Vec<u8>, String> {
+    let resp = get(&a.browser_url, "application/octet-stream")?;
     let mut buf = Vec::new();
     resp.into_reader().take(MAX_BYTES + 1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
     if buf.len() as u64 > MAX_BYTES {
@@ -168,11 +147,11 @@ static RELAUNCH_NOW: AtomicBool = AtomicBool::new(false);
 
 /// Download the release's exe, verify it and swap it in for the running one (Windows lets
 /// a running exe be renamed). On success the app should close; `relaunch` then starts it.
-pub fn install(rel: &Release, token: Option<&str>) -> Result<(), String> {
+pub fn install(rel: &Release) -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| e.to_string())?;
-    let bytes = fetch(&rel.exe, token)?;
+    let bytes = fetch(&rel.exe)?;
     let sha = match &rel.exe_sha {
-        Some(a) => Some(String::from_utf8_lossy(&fetch(a, token)?).into_owned()),
+        Some(a) => Some(String::from_utf8_lossy(&fetch(a)?).into_owned()),
         None => None,
     };
     verify(&bytes, sha.as_deref())?;
@@ -237,15 +216,15 @@ mod tests {
     }
 
     const SAMPLE: &str = r#"{"tag_name":"v1.2.0","html_url":"https://github.com/o/r/releases/tag/v1.2.0","assets":[
-        {"name":"pota-auto-digimationator-v1.2.0-windows-x64.zip","url":"https://api.github.com/a/1","browser_download_url":"https://github.com/z"},
-        {"name":"pota-auto-digimationator.exe","url":"https://api.github.com/a/2","browser_download_url":"https://github.com/e"},
-        {"name":"pota-auto-digimationator.exe.sha256","url":"https://api.github.com/a/3","browser_download_url":"https://github.com/s"}]}"#;
+        {"name":"pota-auto-digimationator-v1.2.0-windows-x64.zip","browser_download_url":"https://github.com/z"},
+        {"name":"pota-auto-digimationator.exe","browser_download_url":"https://github.com/e"},
+        {"name":"pota-auto-digimationator.exe.sha256","browser_download_url":"https://github.com/s"}]}"#;
 
     #[test]
     fn parses_a_release() {
         let r = parse_release(SAMPLE).unwrap();
         assert_eq!(r.version, "1.2.0");
-        assert_eq!(r.exe.api_url, "https://api.github.com/a/2");
+        assert_eq!(r.exe.browser_url, "https://github.com/e");
         assert_eq!(r.exe_sha.unwrap().browser_url, "https://github.com/s");
         assert!(parse_release(r#"{"tag_name":"v1","assets":[]}"#).is_err());
         assert!(parse_release("not json").is_err());
