@@ -147,6 +147,11 @@ impl SpotTable {
             .collect()
     }
 
+    /// Spots of `call` on `band` in `mode` (upper case, e.g. "FT8").
+    pub fn spots_for_mode(&self, call: &str, band: &str, mode: &str) -> Vec<&Spot> {
+        self.spots_for(call, Some(band)).into_iter().filter(|s| s.mode.eq_ignore_ascii_case(mode)).collect()
+    }
+
     /// Spots on `band` whose mode is `mode` (e.g. "40m", "FT8"), by frequency.
     pub fn on(&self, band: &str, mode: &str) -> Vec<&Spot> {
         let mode = mode.to_uppercase();

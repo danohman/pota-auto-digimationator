@@ -865,9 +865,9 @@ impl Hunter {
         let mut changed = false;
         for e in self.worked.iter_mut() {
             if e.ref_.is_empty() {
-                let mut spots = table.spots_for(&e.call, Some(&e.band));
+                let mut spots = table.spots_for_mode(&e.call, &e.band, &e.mode);
                 if spots.is_empty() {
-                    spots = table.spots_for(&e.call, None);
+                    spots = table.spots_for(&e.call, None).into_iter().filter(|s| s.mode.eq_ignore_ascii_case(&e.mode)).collect();
                 }
                 if let Some(s) = spots.first() {
                     e.ref_ = s.reference.clone();
@@ -1064,7 +1064,7 @@ impl Hunter {
     fn park_now(&self, call: &str, band: Option<&str>) -> (String, String) {
         let band = band.filter(|b| !b.is_empty()).map(str::to_string).or_else(|| self.band().map(str::to_string));
         if let (Some(spots), Some(band)) = (&self.spots, band) {
-            if let Some(s) = spots.spots_for(call, Some(&band)).first() {
+            if let Some(s) = spots.spots_for_mode(call, &band, &self.mode()).first() {
                 return (s.reference.clone(), s.park_name.clone());
             }
         }
@@ -1075,7 +1075,7 @@ impl Hunter {
     pub fn current_parks(&self, call: &str, band: Option<&str>) -> Vec<String> {
         match (&self.spots, band) {
             (Some(spots), Some(b)) => spots
-                .spots_for(call, Some(b))
+                .spots_for_mode(call, b, &self.mode())
                 .iter()
                 .filter(|s| !s.reference.is_empty())
                 .map(|s| s.reference.clone())
@@ -1354,7 +1354,7 @@ impl Hunter {
         }
 
         let spots: Vec<(String, String)> = match &self.spots {
-            Some(s) => s.spots_for(&call, Some(band)).iter().map(|s| (s.reference.clone(), s.park_name.clone())).collect(),
+            Some(s) => s.spots_for_mode(&call, band, &self.mode()).iter().map(|s| (s.reference.clone(), s.park_name.clone())).collect(),
             None => Vec::new(),
         };
         if let Some(first) = spots.first() {

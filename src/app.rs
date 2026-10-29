@@ -1396,7 +1396,7 @@ impl App {
         }
         let Some(p) = parse_message(&d.message) else { return };
         let call = base_call(&p.call);
-        if call == self.h.my_call() || spots.spots_for(&call, Some(band)).is_empty() {
+        if call == self.h.my_call() || spots.spots_for_mode(&call, band, &self.h.mode()).is_empty() {
             return;
         }
         self.heard.insert(call.clone(), self.now() + HEARD_SECONDS);
