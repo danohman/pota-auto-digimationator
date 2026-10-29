@@ -1074,22 +1074,6 @@ impl Panel {
         let mut v = app.s.rig_clean;
         l.switch_row("Keep ATT, NB and NR off", "Sent at start-up and after each band or mode change", &mut v, true, 0.0);
         app.s.rig_clean = v;
-        let choices = [("leave", "Leave"), ("off", "Off"), ("on", "On")];
-        for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "NR")] {
-            let cur = match key {
-                "att" => app.s.rig_restore_att.clone(),
-                "nb" => app.s.rig_restore_nb.clone(),
-                _ => app.s.rig_restore_dnr.clone(),
-            };
-            if let Some(v) = l.segmented_row(&format!("{name} when closing"), "Sent to the radio when the app closes; choose the state to leave it in", key, &choices, &cur) {
-                match key {
-                    "att" => app.s.rig_restore_att = v.into(),
-                    "nb" => app.s.rig_restore_nb = v.into(),
-                    _ => app.s.rig_restore_dnr = v.into(),
-                }
-                l.act.push(Do::Changed);
-            }
-        }
         l.section("Radio Tx power (via the COM port)");
         let (vals, labels) = stepper_labels_power();
         let cur = app.s.rig_power.unwrap_or(0);
@@ -1098,12 +1082,12 @@ impl Panel {
             app.s.rig_power = (vals[i] != 0).then_some(vals[i]);
             l.act.push(Do::Changed);
         }
-        let cur = app.s.rig_power_close.unwrap_or(0);
-        let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
-        if let Some(i) = l.stepper_row("Tx power when closing", "Set when the app closes, 5 to 100 W", &labels, idx) {
-            app.s.rig_power_close = (vals[i] != 0).then_some(vals[i]);
-            l.act.push(Do::Changed);
-        }
+        l.section("Restore");
+        let mut v = app.s.rig_restore;
+        l.switch_row("Restore the radio's settings", "Put back as they were before each QSY and on close", &mut v, true, 0.0);
+        app.s.rig_restore = v;
+        let (w, small, muted) = (l.right - l.left, l.f.small.clone(), l.p.muted);
+        l.paragraph("When enabled, NB, NR, ATT and Tx power are restored to the settings the radio had before the program changed them, before the program QSYs to another band and when it closes.", &small, muted, w, 0.0, 8.0);
     }
 
     fn connect_tab(&mut self, app: &mut App, l: &mut L) {

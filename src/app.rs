@@ -852,16 +852,17 @@ impl App {
 
     /// ATT, NB and NR off on the main receiver (the radio may remember them per band).
     fn rig_clean(&mut self, quiet: bool) {
-        let clean = self.s.rig_clean.then_some(false);
-        let power = self.s.rig_power;
-        if clean.is_some() || power.is_some() {
-            self.rig_applied = true;
-            let why = match (clean, power) {
-                (Some(_), Some(w)) => format!("ATT/NB/NR off, PWR {w} W"),
-                (None, Some(w)) => format!("PWR {w} W"),
-                _ => "ATT/NB/NR off".to_string(),
-            };
-            self.rig.set_rig(clean, clean, clean, power, false, &why, quiet);
+        let wants = crate::cat::Wants { clean: self.s.rig_clean, power: self.s.rig_power };
+        if !(wants.clean || wants.power.is_some()) {
+            return;
+        }
+        self.rig_applied = true;
+        let mut parts = vec![];
+        if wants.clean {
+            parts.push("ATT/NB/NR off".to_string());
+        }
+        if let Some(w) = wants.power {
+            parts.push(format!("PWR {w} W"));
         }
     }
 
@@ -869,6 +870,8 @@ impl App {
         let (Some(band), mode) = (self.h.band(), self.h.mode()) else { return };
         if mode.is_empty() {
             return;
+        let fresh = !quiet && self.s.rig_restore;
+        self.rig.apply(wants, fresh, false, &parts.join(", "), quiet);
         }
         let key = (band.to_string(), mode);
         if self.rig_key.as_ref() == Some(&key) {
@@ -888,21 +891,10 @@ impl App {
         }
     }
 
-    fn restore_wants(&self) -> (Option<bool>, Option<bool>, Option<bool>) {
-        let w = |v: &str| match v {
-            "on" => Some(true),
-            "off" => Some(false),
-            _ => None,
-        };
-        (w(&self.s.rig_restore_att), w(&self.s.rig_restore_nb), w(&self.s.rig_restore_dnr))
-    }
-
-    /// On close, put back what the operator chose (the rig's old state isn't read).
+    /// On close, put the radio back as it was before we changed it.
     fn rig_restore(&self, why: &str) {
-        let (a, n, d) = self.restore_wants();
-        let power = self.s.rig_power_close;
-        if self.rig_applied && (a.is_some() || n.is_some() || d.is_some() || power.is_some()) {
-            self.rig.set_rig(a, n, d, power, true, why, false);
+        if self.rig_applied && self.s.rig_restore {
+            self.rig.restore(true, why);
         }
     }
 
@@ -1486,11 +1478,10 @@ impl App {
         self.timers.retain(|(_, t)| !matches!(t, Timer::CheckMode(_)));
         }
         // Press WSJT-X's band/mode buttons in order on a worker thread (PowerShell takes a
-        // second each); first leave the band with ATT/NB/NR at their defaults.
+        // second each); first put the radio back as it was before we changed it.
         let post = self.post.clone();
         let band_now = self.h.band().unwrap_or("").to_string();
-        let (a, n, d) = self.restore_wants();
-        let rig = (restore && self.rig_applied && (a.is_some() || n.is_some() || d.is_some())).then(|| self.rig.clone());
+        let rig = (restore && self.rig_applied && self.s.rig_restore).then(|| self.rig.clone());
         // Fallbacks for WSJT-X builds without the band/mode buttons (WSJT-Z): the mode goes
         // by UDP Configure, the band by tuning the rig to the mode's usual frequency.
         let tune_rig = self.rig.clone();
@@ -1501,7 +1492,7 @@ impl App {
             .name("retune".into())
             .spawn(move || {
                 if let Some(rig) = rig {
-                    rig.set_rig(a, n, d, None, true, &format!("QSY, setting {band_now} ATT/NB/NR back to normal"), false);
+                    rig.restore(true, &format!("QSY, putting {band_now} NB/NR/ATT/power back as they were"));
                     std::thread::sleep(Duration::from_millis(500));
                 }
                 for (i, (what, value)) in steps.into_iter().enumerate() {
@@ -3773,7 +3764,7 @@ impl eframe::App for App {
             s.stop();
         }
         self.settings_changed();
-        self.rig_restore("Closing, setting ATT/NB/NR back to normal");
+        self.rig_restore("Closing, putting NB/NR/ATT/power back as they were");
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {

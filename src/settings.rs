@@ -64,14 +64,10 @@ pub struct Settings {
     pub pop_path: String,
     /// keep ATT/NB/NR off on the Yaesu, over the COM port (cat.rs)
     pub rig_clean: bool,
-    /// on close: "on", "off" or "leave" (the rig can't be read back)
-    pub rig_restore_att: String,
-    pub rig_restore_nb: String,
-    pub rig_restore_dnr: String,
+    /// put NB, NR, ATT and power back as they were before QSY and on close
+    pub rig_restore: bool,
     /// Tx power in watts (5 to 100) set at start-up and after each band/mode change; None = leave
     pub rig_power: Option<u32>,
-    /// Tx power in watts set on close; None = leave
-    pub rig_power_close: Option<u32>,
     /// radio make: "Yaesu", "Kenwood" or "Icom" (cat::MAKES)
     pub rig_type: String,
     /// Icom CI-V address in hex, used when the model is "Other"
@@ -142,11 +138,8 @@ impl Default for Settings {
             pop: true,
             pop_path: String::new(),
             rig_clean: true,
-            rig_restore_att: "on".into(),
-            rig_restore_nb: "on".into(),
-            rig_restore_dnr: "on".into(),
+            rig_restore: true,
             rig_power: None,
-            rig_power_close: None,
             rig_type: "Yaesu".into(),
             rig_civ: "94".into(),
             rig_model: "FTDX101D".into(),

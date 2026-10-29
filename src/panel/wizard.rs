@@ -734,22 +734,6 @@ impl Wizard {
                 l.section("Receiver");
                 switch(l, "Keep ATT, NB and NR off", "Sent at start-up and after each band change", &mut app.s.rig_clean,
                        "Attenuator, noise blanker and noise reduction hurt weak-signal digital decoding, and the radio may remember them for each band. When on, the program turns all three off for the main receiver two seconds after it starts and again after every band or mode change.");
-                let choices = [("leave", "Leave"), ("off", "Off"), ("on", "On")];
-                for (key, name) in [("att", "ATT"), ("nb", "NB"), ("dnr", "NR")] {
-                    let cur = match key {
-                        "att" => app.s.rig_restore_att.clone(),
-                        "nb" => app.s.rig_restore_nb.clone(),
-                        _ => app.s.rig_restore_dnr.clone(),
-                    };
-                    if let Some(v) = l.segmented_row(&format!("{name} when closing"), "State to leave the radio in", &format!("wiz-{key}"), &choices, &cur) {
-                        match key {
-                            "att" => app.s.rig_restore_att = v.into(),
-                            "nb" => app.s.rig_restore_nb = v.into(),
-                            _ => app.s.rig_restore_dnr = v.into(),
-                        }
-                    }
-                }
-                help(l, "The program does not remember what the radio was set to before it started. Choose what each should be when you close the program: On, Off, or Leave (send nothing). Your usual setting is probably On.");
                 l.section("Transmit power");
                 let (vals, labels) = stepper_labels_power();
                 let cur = app.s.rig_power.unwrap_or(0);
@@ -757,12 +741,10 @@ impl Wizard {
                 if let Some(i) = l.stepper_row("Tx power at start-up and QSY", "5 to 100 W, or Leave", &labels, idx) {
                     app.s.rig_power = (vals[i] != 0).then_some(vals[i]);
                 }
-                let cur = app.s.rig_power_close.unwrap_or(0);
-                let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
-                if let Some(i) = l.stepper_row("Tx power when closing", "5 to 100 W, or Leave", &labels, idx) {
-                    app.s.rig_power_close = (vals[i] != 0).then_some(vals[i]);
-                }
-                help(l, "Digital modes should run at modest power, and a hunter does not need much. The first value is set when the program starts and after each band or mode change; the second when it closes, so the radio is not left at the digital setting. Leave sends nothing.");
+                help(l, "Digital modes should run at modest power, and a hunter does not need much. The power is set when the program starts and after each band or mode change. Leave sends nothing.");
+                l.section("Restore");
+                switch(l, "Restore the radio's settings", "Put back as they were before each QSY and on close", &mut app.s.rig_restore,
+                       "When on, NB, NR, ATT and Tx power are restored to the settings the radio had before the program changed them: before the program QSYs to another band and when it closes.");
             }
             Step::Review => {
                 lead(l, "This is what will be saved. Go Back to change anything, or press Finish.");
@@ -805,7 +787,7 @@ impl Wizard {
                     }),
                     ("Sounds", format!("QSO logged {}, wanted park {}", on(s.ding), on(s.pop))),
                     ("Radio connection", if s.rig_com.is_empty() { format!("{} {}, no port chosen (nothing will be sent)", s.rig_type, s.rig_model) } else { format!("{} {} on {}, {} baud", s.rig_type, s.rig_model, s.rig_com, s.rig_baud) }),
-                    ("Radio", format!("ATT/NB/NR off {}, Tx power {}", on(s.rig_clean), s.rig_power.map_or("left alone".to_string(), |w| format!("{w} W")))),
+                    ("Radio", format!("ATT/NB/NR off {}, restore {}, Tx power {}", on(s.rig_clean), on(s.rig_restore), s.rig_power.map_or("left alone".to_string(), |w| format!("{w} W")))),
                 ];
                 for (title, value) in rows {
                     l.row(title, &value, 0.0, 0.0, p.text);

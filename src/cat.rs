@@ -418,22 +418,26 @@ pub fn send_verified(cfg: &Cfg, cmds: &[String]) -> Result<Vec<(String, bool)>, 
     let mut p = open(cfg)?;
     let mut out = vec![];
     for c in cmds {
-        let mut ok = false;
-        for _ in 0..TRIES {
-            let _ = p.clear(serialport::ClearBuffer::Input);
-            p.write_all(&wire(cfg.rig, c)).map_err(|e| format!("{}: {e}", cfg.port))?;
-            std::thread::sleep(Duration::from_millis(150));
-            let _ = p.clear(serialport::ClearBuffer::Input);
-            p.write_all(&wire(cfg.rig, &query_for(cfg.rig, c))).map_err(|e| format!("{}: {e}", cfg.port))?;
-            let reply = read_until(p.as_mut(), cfg.rig, |r| confirms(cfg.rig, r, c), ANSWER_WAIT);
-            if confirms(cfg.rig, &reply, c) {
-                ok = true;
-                break;
-            }
-        }
+        let ok = send_one(p.as_mut(), cfg, c, TRIES)?;
         out.push((c.clone(), ok));
     }
     Ok(out)
+}
+
+/// Send one set command and read it back, up to `tries` times.
+fn send_one(p: &mut dyn serialport::SerialPort, cfg: &Cfg, c: &str, tries: usize) -> Result<bool, String> {
+    for _ in 0..tries {
+        let _ = p.clear(serialport::ClearBuffer::Input);
+        p.write_all(&wire(cfg.rig, c)).map_err(|e| format!("{}: {e}", cfg.port))?;
+        std::thread::sleep(Duration::from_millis(150));
+        let _ = p.clear(serialport::ClearBuffer::Input);
+        p.write_all(&wire(cfg.rig, &query_for(cfg.rig, c))).map_err(|e| format!("{}: {e}", cfg.port))?;
+        let reply = read_until(p, cfg.rig, |r| confirms(cfg.rig, r, c), ANSWER_WAIT);
+        if confirms(cfg.rig, &reply, c) {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 
@@ -579,33 +583,82 @@ pub struct RigClient {
     post: Post,
     cfg: Arc<Mutex<Option<Cfg>>>,
     lock: Arc<Mutex<()>>,
+    /// what the radio had before we changed it (NB, NR, ATT, power), for `restore`
+    saved: Arc<Mutex<Vec<(Item, u32)>>>,
+}
+
+/// Which receive/transmit settings to put on the radio.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Wants {
+    /// ATT, NB and NR off
+    pub clean: bool,
+    /// transmit power in watts
+    pub power: Option<u32>,
 }
 
 impl RigClient {
     pub fn new(post: Post) -> Self {
-        RigClient { post, cfg: Arc::new(Mutex::new(None)), lock: Arc::new(Mutex::new(())) }
+        RigClient { post, cfg: Arc::new(Mutex::new(None)), lock: Arc::new(Mutex::new(())), saved: Arc::new(Mutex::new(Vec::new())) }
     }
 
     pub fn set_cfg(&self, cfg: Option<Cfg>) {
         *self.cfg.lock().unwrap() = cfg;
     }
 
-    /// Send the commands on a worker thread, or right here with `wait`.
-    pub fn set_rig(&self, att: Option<bool>, nb: Option<bool>, dnr: Option<bool>, power: Option<u32>, wait: bool, why: &str, quiet: bool) {
+    /// Put `wants` on the radio on a worker thread, or right here with `wait`. With `fresh`,
+    /// first read the values about to be changed and keep them for `restore`.
+    pub fn apply(&self, wants: Wants, fresh: bool, wait: bool, why: &str, quiet: bool) {
         let rig = self.cfg.lock().unwrap().as_ref().map_or(Rig::Yaesu(100), |c| c.rig);
-        let cmds = rig_commands(rig, att, nb, dnr, power);
+        let cmds = rig_commands(rig, wants.clean.then_some(false), wants.clean.then_some(false), wants.clean.then_some(false), wants.power);
+        let mut items = vec![];
+        if wants.clean {
+            items.extend([Item::Att, Item::Nb, Item::Nr]);
+        }
+        if wants.power.is_some() {
+            items.push(Item::Pwr);
+        }
         if cmds.is_empty() {
             return;
         }
+        let me = self.clone();
+        let why = why.to_string();
+        let run = move || {
+            if fresh {
+                me.remember(&items);
+            }
+            me.do_set_rig(&cmds, &why, quiet, "confirmed");
+        };
         if wait {
-            self.do_set_rig(&cmds, why, quiet);
+            run();
         } else {
-            let me = self.clone();
-            let why = why.to_string();
-            std::thread::Builder::new().name("rig-cat".into()).spawn(move || me.do_set_rig(&cmds, &why, quiet)).ok();
+            std::thread::Builder::new().name("rig-cat".into()).spawn(run).ok();
         }
     }
 
+    /// Read the radio's current values of `items` and keep them as the state to restore.
+    fn remember(&self, items: &[Item]) {
+        let _g = self.lock.lock().unwrap();
+        let Some(cfg) = self.cfg.lock().unwrap().clone() else { return };
+        let Ok(mut p) = open(&cfg) else { return };
+        let got: Vec<(Item, u32)> = items.iter().filter_map(|i| read_value(p.as_mut(), cfg.rig, *i).map(|v| (*i, norm(*i, v)))).collect();
+        *self.saved.lock().unwrap() = got;
+    }
+
+    /// Put back what `apply` found on the radio (once; nothing happens if nothing was saved).
+    pub fn restore(&self, wait: bool, why: &str) {
+        let saved = std::mem::take(&mut *self.saved.lock().unwrap());
+        let rig = self.cfg.lock().unwrap().as_ref().map_or(Rig::Yaesu(100), |c| c.rig);
+        let cmds: Vec<String> = saved.iter().map(|(i, v)| make_set(rig, *i, *v)).collect();
+        if cmds.is_empty() {
+            return;
+        }
+        let (me, why) = (self.clone(), why.to_string());
+        if wait {
+            me.do_set_rig(&cmds, &why, false, "restored");
+        } else {
+            std::thread::Builder::new().name("rig-cat".into()).spawn(move || me.do_set_rig(&cmds, &why, false, "restored")).ok();
+        }
+    }
 
     /// Tune the radio to `hz` (blocking; call from a worker thread). WSJT-X follows the
     /// radio's frequency, which is how a band change works when its band buttons are missing.
@@ -640,7 +693,7 @@ impl RigClient {
             .ok();
     }
 
-    fn do_set_rig(&self, cmds: &[String], why: &str, quiet: bool) {
+    fn do_set_rig(&self, cmds: &[String], why: &str, quiet: bool, verb: &str) {
         let _g = self.lock.lock().unwrap();
         let say = |t: String, tag: Tag| (self.post)(Event::Aclog(t, tag));
         let Some(cfg) = self.cfg.lock().unwrap().clone() else {
@@ -654,7 +707,7 @@ impl RigClient {
                 let ok: Vec<String> = res.iter().filter(|(_, ok)| *ok).map(|(c, _)| c.clone()).collect();
                 let bad: Vec<String> = res.iter().filter(|(_, ok)| !*ok).map(|(c, _)| c.clone()).collect();
                 if !ok.is_empty() {
-                    say(format!("CAT:{} via {}, confirmed: {}", cfg.rig.brand(), cfg.port, describe(cfg.rig, &ok)), Tag::Info);
+                    say(format!("CAT:{} via {}, {verb}: {}", cfg.rig.brand(), cfg.port, describe(cfg.rig, &ok)), Tag::Info);
                 }
                 if bad.is_empty() {
                     if !quiet {
