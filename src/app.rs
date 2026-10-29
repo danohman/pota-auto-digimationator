@@ -2810,7 +2810,7 @@ impl App {
         let mut h = 7.0 + f.heading.m.linespace + 4.0 + 9.0 + 4.0; // header, rows, bottom
         let mut wraps = vec![];
         for (band, mode, n, newest) in &self.notices {
-            let w = measure(&f.ui_bold, &self.notice_label(*n, band, mode, newest));
+            let w = measure(&f.ui, &self.notice_label(*n, band, mode, newest));
             let bw = Self::qsy_button(f, &self.p, "QSY").size(ui).x;
             let wrap = lx + bw + 8.0 + w + 2.0 > width - 1.0 - PAD;
             wraps.push(wrap);
@@ -2857,7 +2857,7 @@ impl App {
             } else {
                 (lx + sz.x + 8.0, ry)
             };
-            let w = ui::text(ui, ui.painter(), Pos2::new(lab_x + 1.0, lab_y + 1.0), &label, &f.ui_bold, p.new);
+            let w = ui::text(ui, ui.painter(), Pos2::new(lab_x + 1.0, lab_y + 1.0), &label, &f.ui, p.new);
             let label_r = Rect::from_min_size(Pos2::new(lab_x, lab_y), Vec2::new(w + 2.0, rowh));
             let label_resp = ui.interact(label_r, Id::unique(("notice", i)), Sense::hover());
             if label_resp.hovered() {

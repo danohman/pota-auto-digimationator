@@ -214,7 +214,7 @@ impl LogView {
 
     /// The font a line's text is drawn in (the same proportional font as the Current Info card).
     fn body<'a>(f: &'a Fonts, l: &Line) -> &'a crate::theme::Font {
-        if l.tag == Tag::Call { &f.ui_bold } else { &f.ui }
+        if matches!(l.tag, Tag::Call | Tag::Error | Tag::Hunt) { &f.ui_bold } else { &f.ui }
     }
 
     /// Word-wrap like Tk's Text (wrap="word"): break after spaces, a word longer than a
