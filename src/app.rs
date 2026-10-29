@@ -2329,11 +2329,10 @@ impl App {
         }
         placed.push((6, row, (limit - spots_sz.x).max(PAD)));
         let rows = row + 1;
-        let row_has_radio = |r: usize| placed.iter().any(|&(k, rr, _)| k == 4 && rr == r);
         let y0 = top + 10.0;
         let mut row_y = vec![y0; rows];
         for r in 1..rows {
-            row_y[r] = row_y[r - 1] + row0 + 6.0 + if row_has_radio(r - 1) { 7.0 } else { 0.0 };
+            row_y[r] = row_y[r - 1] + row0 + 6.0;
         }
         let spot = |kind: u8| placed.iter().find(|&&(k, _, _)| k == kind).map(|&(_, r, x)| (x, row_y[r]));
         let place = |sz: Vec2, at: (f32, f32)| Rect::from_min_size(Pos2::new(at.0, at.1 + ((row0 - sz.y) / 2.0).floor()), sz);
@@ -2360,24 +2359,25 @@ impl App {
         if let Some((bx, by)) = spot(4) {
             let sz = tx.size(ui);
             let r = place(sz, (bx, by));
-            tx.show(ui, Id::unique("radio-badge"), r, false);
-            // the slim progress bar under it: how far through the current T/R period
-            let bar = Rect::from_min_max(Pos2::new(bx + 2.0, by + row0 + 3.0), Pos2::new(bx + sz.x + 8.0 - 10.0, by + row0 + 7.0));
+            let resp = ui.interact(r, Id::unique("radio-badge"), Sense::hover());
+            // the chip is its own progress bar: the pulsing color fills left to right
+            // through the current T/R period over a darker track
             let period = self.cycle_period();
             let k = cycles::wsjtx_progress(epoch_now(), period) as f32;
-            let painter = ui.painter();
-            painter.rect_filled(bar, ui::radius(2.0), p.border);
-            let filled = (bar.width() * k.clamp(0.0, 1.0)).round().max(4.0);
-            let fill = if radio == Some(Radio::Tx) { p.bad } else { p.accent };
-            painter.rect_filled(Rect::from_min_size(bar.min, Vec2::new(filled, 4.0)), ui::radius(2.0), fill);
-            let resp = ui.interact(bar.expand2(Vec2::new(0.0, 2.0)), Id::unique("cycle-bar"), Sense::hover());
+            let split = (r.left() + (r.width() * k.clamp(0.0, 1.0)).round()).min(r.right());
+            let track = Rnd { fill: theme::mix(tx.fill, Color32::BLACK, 0.5), ..tx.clone() };
+            let painter = ui.painter().clone();
+            track.paint(ui, &painter.with_clip_rect(Rect::from_min_max(Pos2::new(split, r.top()), r.right_bottom())), r, false);
+            if split > r.left() {
+                tx.paint(ui, &painter.with_clip_rect(Rect::from_min_max(r.left_top(), Pos2::new(split, r.bottom()))), r, false);
+            }
             let mode = st.as_ref().map(|s| s.mode.clone()).unwrap_or_default();
-            self.tips.tip(&resp, &format!("{mode} cycle: {} s", period_text(period)), 500, TipAt::Below(bar));
+            self.tips.tip(&resp, &format!("{mode} cycle: {} s", period_text(period)), 500, TipAt::Below(r));
         }
         let r = place(spots_sz, spot(6).unwrap());
         let resp = spots.show(ui, Id::unique("spots-chip"), r, false);
         self.tips.tip(&resp, "pota.app spots, fetched at most once a minute", 500, TipAt::Below(r));
-        row_y[rows - 1] + row0 + if row_has_radio(rows - 1) { 7.0 } else { 0.0 } + 6.0
+        row_y[rows - 1] + row0 + 6.0
     }
 
     fn card(&self, ui: &Ui, rect: Rect) {
