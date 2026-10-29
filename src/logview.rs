@@ -567,7 +567,7 @@ fn paint_button(ui: &Ui, painter: &eframe::egui::Painter, f: &Fonts, p: &Palette
     } else if b.label == "Keep calling" {
         (p.on, Color32::WHITE, Some(p.on_hover))
     } else {
-        (p.accent, p.accent_text, Some(p.accent_hover))
+        (p.blue, Color32::WHITE, Some(p.blue_hover))
     };
     let mut rnd = Rnd::new(b.label, &f.ui_bold).pill().pad(9.0, 1.0).colors(fill, fg);
     if let Some(h) = hover {

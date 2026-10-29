@@ -999,7 +999,7 @@ impl Hunter {
     /// Is a glowing button's QSO (or our CQ) still running?
     pub fn is_active(&self, a: &Active) -> bool {
         match a {
-            Active::QsoRunning(call) => self.target_.as_ref().is_some_and(|t| &t.call == call && !t.completed),
+            Active::QsoRunning(call) => self.target_.as_ref().is_some_and(|t| &t.call == call && !t.completed && t.idle_since == 0.0),
             Active::CqStarted => self.cq_started,
         }
     }

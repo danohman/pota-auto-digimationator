@@ -314,6 +314,8 @@ pub struct App {
     notice_pulse: HashMap<(String, String), f64>,
     /// (base call, band) -> `now()` of the last decode sent by that station
     last_heard: HashMap<(String, String), f64>,
+    /// last band WSJT-X reported; kept while the dial is between bands (mid-retune)
+    heard_band: std::cell::Cell<Option<&'static str>>,
     decode_until: f64,
     radio: Option<Radio>,
     periods: PeriodDetector,
@@ -562,6 +564,7 @@ impl App {
             notice_seen: HashMap::new(),
             notice_pulse: HashMap::new(),
             last_heard: HashMap::new(),
+            heard_band: std::cell::Cell::new(None),
             decode_until: 0.0,
             radio: None,
             periods: PeriodDetector::default(),
@@ -1323,7 +1326,7 @@ impl App {
 
     /// Any new decode sent by a station restarts its "Heard" age in the spot lists.
     fn record_heard(&mut self, d: &Decode) {
-        let Some(band) = self.h.band() else { return };
+        let Some(band) = self.heard_band() else { return };
         if !d.new {
             return;
         }
@@ -1336,18 +1339,26 @@ impl App {
         self.refresh_heard_cells();
     }
 
-    /// "12s" under a minute, else whole minutes ("3m"); "-" if never heard on this band.
+    /// The current band, or the last one seen while the dial is between bands.
+    fn heard_band(&self) -> Option<&'static str> {
+        if let Some(b) = self.h.band() {
+            self.heard_band.set(Some(b));
+        }
+        self.heard_band.get()
+    }
+
     /// Seconds since we last heard `call` on this band, for sorting the Heard column.
     fn heard_key(&self, call: &str) -> SortKey {
-        let Some(band) = self.h.band() else { return SortKey::None };
+        let Some(band) = self.heard_band() else { return SortKey::None };
         match self.last_heard.get(&(base_call(call), band.to_string())) {
             Some(t) => SortKey::Num((self.now() - t).max(0.0).floor()),
             None => SortKey::None,
         }
     }
 
+    /// "12s" under a minute, else whole minutes ("3m"); "-" if never heard on this band.
     fn heard_text(&self, call: &str) -> String {
-        let Some(band) = self.h.band() else { return "-".into() };
+        let Some(band) = self.heard_band() else { return "-".into() };
         match self.last_heard.get(&(base_call(call), band.to_string())) {
             None => "-".into(),
             Some(t) => {
