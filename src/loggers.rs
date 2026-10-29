@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! Sends each logged QSO to other logging programs as an ADIF record: Log4OM, DXKeeper,
-//! HRD Logbook and N1MM Logger+. The wire formats follow GridTracker (BSD-3-Clause), which
+//! HRD Logbook, N1MM Logger+ and Logger32 (see logger32.rs). The wire formats follow GridTracker (BSD-3-Clause), which
 //! logs to the same programs; only protocol facts were taken, no code.
 
 use std::io::Write;
@@ -20,9 +20,10 @@ pub enum Kind {
     Dxkeeper,
     Hrd,
     N1mm,
+    Logger32,
 }
 
-pub const KINDS: [Kind; 4] = [Kind::Log4om, Kind::Dxkeeper, Kind::Hrd, Kind::N1mm];
+pub const KINDS: [Kind; 5] = [Kind::Log4om, Kind::Dxkeeper, Kind::Hrd, Kind::N1mm, Kind::Logger32];
 
 impl Kind {
     /// settings key and Settings > Logging row key
@@ -32,7 +33,13 @@ impl Kind {
             Kind::Dxkeeper => "dxkeeper",
             Kind::Hrd => "hrd",
             Kind::N1mm => "n1mm",
+            Kind::Logger32 => "logger32",
         }
+    }
+
+    /// False for Logger32, which is reached through Windows messages, not a host and port.
+    pub fn uses_network(self) -> bool {
+        self != Kind::Logger32
     }
 
     pub fn from_key(key: &str) -> Option<Kind> {
@@ -45,6 +52,7 @@ impl Kind {
             Kind::Dxkeeper => "DXKeeper",
             Kind::Hrd => "HRD Logbook",
             Kind::N1mm => "N1MM Logger+",
+            Kind::Logger32 => "Logger32",
         }
     }
 
@@ -54,6 +62,7 @@ impl Kind {
             Kind::Dxkeeper => 52000,
             Kind::Hrd => 7826,
             Kind::N1mm => 2333,
+            Kind::Logger32 => 0,
         }
     }
 
@@ -64,6 +73,7 @@ impl Kind {
             Kind::Dxkeeper => "In DXKeeper, open Config > Defaults/Network Service and tick the network service, then enter its Base Port here (default 52000). DXKeeper listens on the base port plus 1, which is where QSOs are sent.",
             Kind::Hrd => "HRD Logbook must be running with its network (TCP) interface on, default port 7826. A QSO is sent as a db add command.",
             Kind::N1mm => "In N1MM Logger+, open Config > Configure Ports, Telnet/Packet Ports, Other Ports and Settings and tick Broadcast Data on the ADIF line (default port 2333).",
+            Kind::Logger32 => "Logger32 must be running. It has no network port: QSOs go in through its External Interface (Windows messages), which needs no setup but allows only five outside programs at once, so close one if this reports that all slots are in use. Each QSO fills Logger32's entry window and logs it, so don't be typing in that window.",
         }
     }
 }
@@ -78,10 +88,15 @@ pub fn adif_line(fields: &[(&str, String)]) -> String {
     s
 }
 
+/// When the QSO started and ended.
+pub fn qso_times(q: &QsoLogged, entry: &WorkedEntry) -> (DateTime<Utc>, DateTime<Utc>) {
+    let t_on: DateTime<Utc> = q.time_on.or(q.time_off).or(entry.time).unwrap_or_else(Utc::now);
+    (t_on, q.time_off.unwrap_or(t_on))
+}
+
 /// The QSO as ADIF fields; empty values are left out.
 pub fn adif_fields(q: &QsoLogged, entry: &WorkedEntry) -> Vec<(&'static str, String)> {
-    let t_on: DateTime<Utc> = q.time_on.or(q.time_off).or(entry.time).unwrap_or_else(Utc::now);
-    let t_off = q.time_off.unwrap_or(t_on);
+    let (t_on, t_off) = qso_times(q, entry);
     let call = if q.dx_call.is_empty() { &entry.call } else { &q.dx_call }.to_uppercase();
     let mut comment = q.comments.clone();
     if !entry.ref_.is_empty() {
@@ -129,7 +144,7 @@ pub fn adif_fields(q: &QsoLogged, entry: &WorkedEntry) -> Vec<(&'static str, Str
 pub fn payload(kind: Kind, fields: &[(&str, String)], port: u16) -> (Vec<u8>, u16) {
     let adif = adif_line(fields);
     match kind {
-        Kind::N1mm => (adif.into_bytes(), port),
+        Kind::N1mm | Kind::Logger32 => (adif.into_bytes(), port), // (Logger32 doesn't use this)
         Kind::Log4om => (format!("ADD {adif}").into_bytes(), port),
         Kind::Dxkeeper => {
             let cmd = format!("<command:3>log <parameters:{}>{adif}\r\n", adif.len());
@@ -150,6 +165,7 @@ pub fn payload(kind: Kind, fields: &[(&str, String)], port: u16) -> (Vec<u8>, u1
 fn deliver(kind: Kind, host: &str, bytes: &[u8], port: u16) -> std::io::Result<()> {
     let addr = (host, port).to_socket_addrs()?.next().ok_or_else(|| std::io::Error::other("no address"))?;
     match kind {
+        Kind::Logger32 => return Err(std::io::Error::other("Logger32 has no network port")),
         Kind::Log4om | Kind::N1mm => {
             let s = UdpSocket::bind("0.0.0.0:0")?;
             s.send_to(bytes, addr)?;
@@ -169,6 +185,13 @@ pub fn log_qso(post: Post, kind: Kind, host: String, port: u16, q: QsoLogged, en
     std::thread::Builder::new()
         .name(kind.key().into())
         .spawn(move || {
+            if kind == Kind::Logger32 {
+                match crate::logger32::send(&crate::logger32::records(&q, &entry)) {
+                    Ok(()) => post(Event::Aclog(format!("Logger32: sent {} {} {}", entry.call, entry.band, entry.mode), Tag::Worked)),
+                    Err(e) => post(Event::Aclog(format!("Logger32: {e}"), Tag::Error)),
+                }
+                return;
+            }
             let (bytes, to_port) = payload(kind, &adif_fields(&q, &entry), port);
             match deliver(kind, &host, &bytes, to_port) {
                 Ok(()) => post(Event::Aclog(format!("{}: sent {} {} {}", kind.name(), entry.call, entry.band, entry.mode), Tag::Worked)),

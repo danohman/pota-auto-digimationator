@@ -136,9 +136,9 @@ WSJT-X pops up its Log QSO window after each QSO and only logs it (and tells thi
 - With **Settings > Logging > Press OK on WSJT-X's Log QSO window** on (the default), the program presses OK whenever that window opens, for any QSO. It sends Enter to the window directly, so it doesn't steal focus. If the window doesn't close after a few tries, the log says so and you can click it yourself. This works whether Auto-Hunt is enabled or disabled.
 - A sound plays whenever WSJT-X logs a QSO (**Settings > Logging**: on or off, test it, or choose your own file).
 
-### Log4OM, DXKeeper, HRD Logbook, N1MM Logger+
+### Log4OM, DXKeeper, HRD Logbook, N1MM Logger+, Logger32
 
-Choose the program from the **Logger program** drop-down on Settings > Logging (or in the setup wizard); its switch, host and port appear below. The QSO is sent as an ADIF record with `SIG=POTA` and `SIG_INFO=<park>` when the park is confirmed. Defaults and what to enable in the other program: Log4OM UDP port 2236 (Settings > Program Configuration > Software Integration > UDP Inbound), DXKeeper base port 52000 (QSOs go to the port after it), HRD Logbook TCP 7826, N1MM Logger+ ADIF broadcast port 2333. These follow GridTracker's formats and have not yet been tried against the real programs; if your logger also receives QSOs straight from WSJT-X, leave ours off to avoid duplicates.
+Choose the program from the **Logger program** drop-down on Settings > Logging (or in the setup wizard); its switch, host and port appear below. The QSO is sent as an ADIF record with `SIG=POTA` and `SIG_INFO=<park>` when the park is confirmed. Defaults and what to enable in the other program: Log4OM UDP port 2236 (Settings > Program Configuration > Software Integration > UDP Inbound), DXKeeper base port 52000 (QSOs go to the port after it), HRD Logbook TCP 7826, N1MM Logger+ ADIF broadcast port 2333. Logger32 has no network port: the program talks to its External Interface (Windows messages, no host or port, nothing to set up; it allows five outside programs at once), fills Logger32's entry window with the QSO and logs it, with the park in the comment. These follow GridTracker's formats and have not yet been tried against the real programs; if your logger also receives QSOs straight from WSJT-X, leave ours off to avoid duplicates.
 
 ### ACLog
 

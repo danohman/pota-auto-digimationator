@@ -2025,7 +2025,7 @@ impl App {
         if active {
             self.activity();
         }
-        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Comma)) && self.dialog.is_none() && self.wsjtx_seen && self.wizard.is_none() {
+        if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Comma)) && self.dialog.is_none() && self.wizard.is_none() {
             self.panel.toggle(self.now());
         }
     }
@@ -2141,7 +2141,7 @@ impl App {
         let r = Rect::from_min_size(Pos2::new(right - sz.x, center(sz.y)), sz);
         let resp = hb.show(ui, Id::unique("hunt-btn"), r, true);
         self.tips.tip(&resp, "Click to turn Auto-Hunt on or off", 500, TipAt::Below(r));
-        if resp.clicked() {
+        if resp.clicked() && self.wsjtx_seen {
             self.toggle_hunt();
         }
         right = r.left() - 10.0;
@@ -2150,7 +2150,7 @@ impl App {
         let r = Rect::from_min_size(Pos2::new(right - sz.x, center(sz.y)), sz);
         let resp = cb.show(ui, Id::unique("cq-btn"), r, true);
         self.tips.tip(&resp, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nAuto-Hunt has priority.", 500, TipAt::Below(r));
-        if resp.clicked() {
+        if resp.clicked() && self.wsjtx_seen {
             self.toggle_cq();
         }
         // titles: only what fits left of the buttons
@@ -2957,7 +2957,9 @@ impl App {
 
     /// The "Waiting for WSJT-X" popup: a card centred in the window, shown from start-up
     /// until WSJT-X's first Status, then never again. It can't be dismissed and blocks the
-    /// rest of the app (user request). Returns true while it is showing.
+    /// cards (user request), but not the header: Settings, the update check and the theme
+    /// button keep working (user request 2026-10-28); the Auto toggles are refused.
+    /// Returns true while it is showing.
     fn draw_wsjtx_wait(&mut self, ctx: &egui::Context, screen: Rect) -> bool {
         if self.wsjtx_seen {
             return false;
@@ -2967,11 +2969,13 @@ impl App {
             return false;
         }
         let (p, f) = (self.p.clone(), self.f.clone());
+        // the header stays usable (Settings gear, update check in the title, theme button)
+        let below = Rect::from_min_max(Pos2::new(screen.left(), self.header_height() + 1.0), screen.max);
         egui::Area::new(Id::new("wsjtx-wait-blocker"))
             .order(Order::Middle)
-            .fixed_pos(Pos2::ZERO)
+            .fixed_pos(below.min)
             .show(ctx, |ui| {
-                ui.allocate_response(screen.size(), Sense::click_and_drag());
+                ui.allocate_response(below.size(), Sense::click_and_drag());
             });
         let heading = "Waiting for WSJT-X...";
         let hint = format!("Start WSJT-X, or check that its UDP Server is {} port {} with Accept UDP requests ticked. \
@@ -3684,6 +3688,7 @@ impl eframe::App for App {
         if area.width() > 20.0 && area.height() > 20.0 {
             self.draw_panes(ui, area);
         }
+        self.draw_wsjtx_wait(&ctx, screen); // (before the panel, so Settings opens on top of it)
         // the settings panel, popups and dialogs
         let mut panel = std::mem::take(&mut self.panel);
         panel.show(self, &ctx, ui);
@@ -3701,7 +3706,6 @@ impl eframe::App for App {
                 Some(None) => {}
             }
         }
-        self.draw_wsjtx_wait(&ctx, screen);
         self.wizard_frame(&ctx, ui); // (a re-run from Settings covers the window)
         self.draw_dialog(&ctx, screen);
         if self.demo_tip {

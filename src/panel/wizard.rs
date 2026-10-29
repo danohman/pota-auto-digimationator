@@ -458,7 +458,7 @@ impl Wizard {
                 l.section("Before you start");
                 bullet(l, "WSJT-X or WSJT-X Improved installed. It does not have to be running yet, but you need it to finish the connection.");
                 bullet(l, "Optional: your pota.app login, so the program can show which parks are new to you.");
-                bullet(l, "Optional: N3FJP ACLog, Log4OM, DXKeeper, HRD Logbook or N1MM Logger+, if you want every QSO logged there too.");
+                bullet(l, "Optional: N3FJP ACLog, Log4OM, DXKeeper, HRD Logbook, N1MM Logger+ or Logger32, if you want every QSO logged there too.");
                 bullet(l, "Optional: a Yaesu FTDX101D, Kenwood TS-590S/SG/TS-890S Elecraft, Icom or Xiegu radio controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
                 l.section("You stay in control");
@@ -797,7 +797,7 @@ impl Wizard {
                         for k in crate::loggers::KINDS {
                             let c = s.logger(k);
                             if c.enabled {
-                                others.push(format!("{} ({}:{})", k.name(), c.host, c.port));
+                                others.push(if k.uses_network() { format!("{} ({}:{})", k.name(), c.host, c.port) } else { k.name().to_string() });
                             }
                         }
                         let to = if others.is_empty() { "no other logger".to_string() } else { others.join(", ") };

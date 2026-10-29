@@ -91,7 +91,7 @@ pub struct Settings {
     pub aclog_enabled: bool,
     pub aclog_host: String,
     pub aclog_port: u16,
-    /// Log4OM, DXKeeper, HRD Logbook and N1MM Logger+ by `loggers::Kind::key`
+    /// Log4OM, DXKeeper, HRD Logbook, N1MM Logger+ and Logger32 by `loggers::Kind::key`
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub loggers: BTreeMap<String, LoggerCfg>,
     /// "" = detect: WSJT-X and WSJT-X Improved log to different folders
