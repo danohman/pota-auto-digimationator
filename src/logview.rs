@@ -86,6 +86,9 @@ pub struct LogView {
     next_uid: u64,
     /// mouse selection: (anchor, focus), each (line uid, char index in the line's text)
     sel: Option<((u64, usize), (u64, usize))>,
+    /// for (anchor, focus): was the pointer over the timestamp (not the gap or the text)?
+    /// Only then is a line's timestamp part of the selection.
+    sel_ts: (bool, bool),
     stick: bool,
     /// filter changed: show the end (Tk's `see end`)
     pub jump_end: bool,
@@ -311,27 +314,55 @@ impl LogView {
                 let ri = if rel < *h1 { 0 } else { (1 + ((rel - h1) / f.mono.m.linespace).floor() as usize).min(rows.len() - 1) };
                 let (a, b) = rows[ri];
                 let origin = if ri == 0 { left + Self::prefix_width(f, l, cw) } else { left };
-                let col = (((pos.x - origin) / cw).round().max(0.0) as usize).min(b - a);
+                // the character under the pointer (the selection takes in every character it touches)
+                let col = (((pos.x - origin) / cw).floor().max(0.0) as usize).min((b - a).saturating_sub(1));
                 return Some((i, a + col));
             }
         }
         let i = last?;
-        Some((i, self.lines[i].text.chars().count()))
+        Some((i, self.lines[i].text.chars().count().saturating_sub(1)))
     }
 
     /// The selection as (start, end) line indices and char indices, start first.
-    fn sel_range(&self) -> Option<((usize, usize), (usize, usize))> {
+    /// The selection in reading order: (line, char, pointer was over the timestamp) twice.
+    fn sel_range(&self) -> Option<((usize, usize, bool), (usize, usize, bool))> {
         let ((ua, ka), (ub, kb)) = self.sel?;
         let ia = self.lines.iter().position(|l| l.uid == ua)?;
         let ib = self.lines.iter().position(|l| l.uid == ub)?;
-        let (a, b) = ((ia, ka), (ib, kb));
-        if a <= b { Some((a, b)) } else { Some((b, a)) }
+        let (a, b) = ((ia, ka, self.sel_ts.0), (ib, kb, self.sel_ts.1));
+        // the end is exclusive and takes in the character under it
+        let end = |p: (usize, usize, bool)| (p.0, (p.1 + 1).min(self.lines[p.0].text.chars().count()), p.2);
+        if (a.0, a.1) <= (b.0, b.1) { Some((a, end(b))) } else { Some((b, end(a))) }
+    }
+
+    /// Is the pointer over a line's timestamp (the first 8 columns), not the gap after it?
+    fn over_ts(pos: Pos2, text_rect: Rect, cw: f32) -> bool {
+        pos.x < text_rect.left() + 12.0 + 8.0 * cw
+    }
+
+    /// Is line `i`'s timestamp part of the selection? Only when the pointer touched it: the
+    /// first line when the drag started on it, the last when it ended on it or reached its
+    /// text, and every line in between.
+    fn ts_selected(i: usize, r: ((usize, usize, bool), (usize, usize, bool))) -> bool {
+        let ((si, sk, sts), (ei, ek, ets)) = r;
+        if i < si || i > ei {
+            false
+        } else if si == ei {
+            sk == 0 && sts
+        } else if i == si {
+            sk == 0 && sts
+        } else if i == ei {
+            ek > 0 || ets
+        } else {
+            true
+        }
     }
 
     /// The selected text, one line per row of the log (timestamp included when the
     /// selection takes in the start of the line).
     fn selected_text(&self, heights: &[f32]) -> String {
-        let Some(((si, sk), (ei, ek))) = self.sel_range() else { return String::new() };
+        let Some(r) = self.sel_range() else { return String::new() };
+        let ((si, sk, _), (ei, ek, _)) = r;
         let mut out = Vec::new();
         for i in si..=ei {
             if heights[i] == 0.0 {
@@ -342,7 +373,7 @@ impl LogView {
             let s = if i == si { sk } else { 0 };
             let e = if i == ei { ek } else { chars.len() };
             let body: String = chars[s.min(e)..e].iter().collect();
-            out.push(if s == 0 { format!("{}  {}", l.ts, body) } else { body });
+            out.push(if Self::ts_selected(i, r) { format!("{}  {}", l.ts, body) } else { body });
         }
         out.join("\n")
     }
@@ -377,11 +408,14 @@ impl LogView {
             if let Some((i, k)) = resp.interact_pointer_pos().and_then(|pos| self.hit(pos, text_rect, &heights, f, cw)) {
                 let at = (self.lines[i].uid, k);
                 self.sel = Some((at, at));
+                let ts = resp.interact_pointer_pos().is_some_and(|pos| Self::over_ts(pos, text_rect, cw));
+                self.sel_ts = (ts, ts);
             }
         } else if resp.dragged() {
             if let (Some(pos), Some((anchor, _))) = (resp.interact_pointer_pos(), self.sel) {
                 if let Some((i, k)) = self.hit(pos, text_rect, &heights, f, cw) {
                     self.sel = Some((anchor, (self.lines[i].uid, k)));
+                    self.sel_ts.1 = Self::over_ts(pos, text_rect, cw);
                 }
                 // dragging past the edge scrolls
                 let step = if pos.y < text_rect.top() { -f.mono.m.linespace } else if pos.y > text_rect.bottom() { f.mono.m.linespace } else { 0.0 };
@@ -403,7 +437,8 @@ impl LogView {
                     b += 1;
                 }
                 let uid = self.lines[i].uid;
-                self.sel = if a < b { Some(((uid, a), (uid, b))) } else { None };
+                self.sel = if a < b { Some(((uid, a), (uid, b - 1))) } else { None };
+                self.sel_ts = (false, false);
             }
         } else if resp.clicked() {
             self.sel = None;
@@ -434,10 +469,10 @@ impl LogView {
             // the selected span of this line's text (char range), and whether the
             // timestamp is in it
             let (sel_s, sel_e, ts_sel) = match range {
-                Some(((si, sk), (ei, ek))) if i >= si && i <= ei => {
+                Some(r @ ((si, sk, _), (ei, ek, _))) if i >= si && i <= ei => {
                     let len = l.text.chars().count();
                     let s = if i == si { sk } else { 0 };
-                    (s, if i == ei { ek } else { len }, s == 0)
+                    (s, if i == ei { ek } else { len }, Self::ts_selected(i, r))
                 }
                 _ => (0, 0, false),
             };
@@ -485,18 +520,6 @@ impl LogView {
                     }
                 }
             }
-        }
-        clicked
-    }
-}
-
-pub fn btn_h(f: &Fonts) -> f32 {
-    f.ui_bold.m.linespace + 2.0
-}
-
-pub fn measure_btn(f: &Fonts, label: &str) -> f32 {
-    measure(&f.ui_bold, label) + 18.0
-}
             // buttons that follow the text (Keep calling), after the end of the last row
             if l.buttons.iter().any(is_trailing) {
                 let n = rows.len().saturating_sub(1);
@@ -512,6 +535,11 @@ pub fn measure_btn(f: &Fonts, label: &str) -> f32 {
                     tx += w + cw;
                 }
             }
+        }
+        clicked
+    }
+}
+
 /// Buttons drawn after the line's text instead of before it.
 fn is_trailing(b: &LogButton) -> bool {
     b.label == "Keep calling"
@@ -549,3 +577,10 @@ fn paint_button(ui: &Ui, painter: &eframe::egui::Painter, f: &Fonts, p: &Palette
     }
 }
 
+pub fn btn_h(f: &Fonts) -> f32 {
+    f.ui_bold.m.linespace + 2.0
+}
+
+pub fn measure_btn(f: &Fonts, label: &str) -> f32 {
+    measure(&f.ui_bold, label) + 18.0
+}

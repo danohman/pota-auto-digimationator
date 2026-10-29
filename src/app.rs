@@ -2685,7 +2685,8 @@ impl App {
             let pp = ui::positions(&f.ui, &info[i].text);
             let n = info[i].text.chars().count().min(pp.len().saturating_sub(1));
             let rel = pos.x - xt;
-            let k = (0..=n).min_by(|&a, &b| (pp[a] - rel).abs().total_cmp(&(pp[b] - rel).abs())).unwrap_or(0);
+            // the character under the pointer (the selection takes in every character it touches)
+            let k = (0..n).rev().find(|&c| pp[c] <= rel).unwrap_or(0);
             (i, k)
         };
         let hover_ok = ui::hover_in(ui, area);
@@ -2721,7 +2722,7 @@ impl App {
                 while b < chars.len() && chars[b] != ' ' {
                     b += 1;
                 }
-                self.static_sel = if a < b { Some(((i, a), (i, b))) } else { None };
+                self.static_sel = if a < b { Some(((i, a), (i, b - 1))) } else { None };
                 self.log.clear_selection();
             }
         } else if resp.clicked() {
@@ -2737,7 +2738,7 @@ impl App {
         }
         // normalised (start, end); dropped if the lines changed under it
         let range = self.static_sel.and_then(|(a, b)| {
-            let (a, b) = if a <= b { (a, b) } else { (b, a) };
+            let (a, b) = if a <= b { (a, (b.0, b.1 + 1)) } else { (b, (a.0, a.1 + 1)) }; // end is exclusive
             (b.0 < info.len()).then_some((a, b))
         });
         if range.is_none() {
@@ -3660,6 +3661,9 @@ impl eframe::App for App {
             return;
         }
         while let Ok(e) = self.rx.try_recv() {
+            // drag over the wizard's text to select it, Ctrl+C copies it
+            let select = self.p.select;
+            self.tsel.end_frame(&ctx, Color32::from_rgba_unmultiplied(select.r(), select.g(), select.b(), 120));
             self.dispatch(e, &ctx);
         }
         self.drain_hunter();

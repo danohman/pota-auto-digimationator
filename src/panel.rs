@@ -806,7 +806,7 @@ impl Panel {
     /// The selected character range of recorded line `idx` (of `n` characters).
     fn about_sel_in(&self, idx: usize, n: usize) -> (usize, usize) {
         let Some((a, b)) = self.about_sel else { return (0, 0) };
-        let (a, b) = if a <= b { (a, b) } else { (b, a) };
+        let (a, b) = if a <= b { (a, (b.0, b.1 + 1)) } else { (b, (a.0, a.1 + 1)) }; // end is exclusive
         if idx < a.0 || idx > b.0 {
             return (0, 0);
         }
@@ -828,7 +828,8 @@ impl Panel {
             let pp = ui::positions(fr, &lines[i].text);
             let n = lines[i].text.chars().count().min(pp.len().saturating_sub(1));
             let rel = pos.x - lines[i].x;
-            let k = (0..=n).min_by(|&a, &b| (pp[a] - rel).abs().total_cmp(&(pp[b] - rel).abs())).unwrap_or(0);
+            // the character under the pointer (the selection takes in every character it touches)
+            let k = (0..n).rev().find(|&c| pp[c] <= rel).unwrap_or(0);
             (i, k)
         };
         // the link's own text, not the empty space after it
@@ -865,7 +866,7 @@ impl Panel {
                 while b < chars.len() && chars[b] != ' ' {
                     b += 1;
                 }
-                self.about_sel = if a < b { Some(((i, a), (i, b))) } else { None };
+                self.about_sel = if a < b { Some(((i, a), (i, b - 1))) } else { None };
                 app.clear_text_selections();
             }
         } else if resp.clicked() {
@@ -875,7 +876,7 @@ impl Panel {
             }
         }
         if let Some((a, b)) = self.about_sel {
-            let (a, b) = if a <= b { (a, b) } else { (b, a) };
+            let (a, b) = if a <= b { (a, (b.0, b.1 + 1)) } else { (b, (a.0, a.1 + 1)) }; // end is exclusive
             if b.0 < lines.len() && l.ui.input(|i| i.events.iter().any(|e| matches!(e, egui::Event::Copy))) {
                 let mut out = String::new();
                 for i in a.0..=b.0 {

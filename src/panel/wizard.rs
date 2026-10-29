@@ -206,7 +206,7 @@ impl Wizard {
         let screen = ctx.content_rect();
         ui.painter().rect_filled(screen, 0.0, p.bg);
         // covers the window behind it (a re-run draws on top of the running app)
-        ui.interact(screen, Id::new("wiz-cover"), Sense::click_and_drag());
+        ui.interact(screen, Id::new("wiz-cover"), Sense::click()); // not drag: that would stop text selection
 
         let cw = (screen.width() - 32.0).clamp(300.0, CARD_W);
         let btn_h = Rnd::new("Next", &f.ui_bold).pill().pad(16.0, 6.0).size(ui).y;
