@@ -515,6 +515,13 @@ impl App {
             Col::new("logged", "Log", "Log").tip("Logged successful or not"),
             Col::new("park", "Park", PARK_SAMPLE).tip("Logged park reference and name"),
         ];
+        let sorts = s.sorts.clone();
+        let saved_sort = |mut t: Table| {
+            if let Some((c, asc)) = sorts.get(t.id) {
+                t.set_sort(c, *asc);
+            }
+            t
+        };
         let pops = s
             .popouts
             .iter()
@@ -544,9 +551,9 @@ impl App {
             p,
             f,
             log: LogView::new(),
-            spots_tree: Table::new("spots", spots_cols).sorted_by("ago", true),
-            done_tree: Table::new("done", done_cols).sorted_by("ago", true),
-            worked_tree: Table::new("worked", worked_cols).sorted_by("time", false),
+            spots_tree: saved_sort(Table::new("spots", spots_cols).sorted_by("ago", true)),
+            done_tree: saved_sort(Table::new("done", done_cols).sorted_by("ago", true)),
+            worked_tree: saved_sort(Table::new("worked", worked_cols).sorted_by("time", false)),
             worked_filter: String::new(),
             spots_key: None,
             spots_title: SPOTS_TITLE.into(),
@@ -2075,9 +2082,14 @@ impl App {
         self.s.layout = Some(settings::Layout { right_w: Some(right_w as i64), split: None, cols: Some(cols), weights: Some(weights) });
     }
 
+    fn current_sorts(&self) -> std::collections::BTreeMap<String, (String, bool)> {
+        [&self.spots_tree, &self.done_tree, &self.worked_tree].iter().map(|t| (t.id.to_string(), t.sort_cfg())).collect()
+    }
+
     fn persist_layout(&mut self, ctx: &egui::Context) {
         self.save_layout(ctx);
         self.save_popouts();
+        self.s.sorts = self.current_sorts();
         if let Some(g) = self.geometry_string(ctx) {
             self.s.window = Some(g);
         }
@@ -3661,6 +3673,9 @@ impl eframe::App for App {
                 self.layout_due = Some(now + 0.5);
             }
             self.last_outer = outer;
+        }
+        if self.layout_due.is_none() && !self.unsaved && self.current_sorts() != self.s.sorts {
+            self.layout_due = Some(now + 0.5);
         }
         if self.layout_due.is_some_and(|t| now >= t) && now > 1.5 {
             self.layout_due = None;

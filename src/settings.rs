@@ -113,6 +113,9 @@ pub struct Settings {
     /// popped-out sections by name (see app::Card)
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub popouts: BTreeMap<String, PopGeom>,
+    /// sorted column of each table by table id (see table::Table)
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub sorts: BTreeMap<String, (String, bool)>,
     /// Tk geometry, "WxH+X+Y"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
@@ -164,6 +167,7 @@ impl Default for Settings {
             font_size: 10,
             layout: None,
             popouts: BTreeMap::new(),
+            sorts: BTreeMap::new(),
             window: None,
             extra: Map::new(),
         }

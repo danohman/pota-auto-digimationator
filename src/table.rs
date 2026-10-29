@@ -158,6 +158,18 @@ impl Table {
         self
     }
 
+    /// Restore a saved sort (column name, ascending); an unknown column keeps the current one.
+    pub fn set_sort(&mut self, name: &str, ascending: bool) {
+        if let Some(i) = self.columns.iter().position(|c| c.name == name) {
+            self.sort = (i, ascending);
+        }
+    }
+
+    /// The sorted column's name and direction, as saved.
+    pub fn sort_cfg(&self) -> (String, bool) {
+        (self.columns[self.sort.0].name.to_string(), self.sort.1)
+    }
+
     /// Put the rows in the sorted column's order (stable, so ties keep the order they were added in).
     pub fn sort_rows(&mut self) {
         let (col, asc) = self.sort;
