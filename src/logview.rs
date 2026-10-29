@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
-//! The Activity log: a word-wrapped monospace list of lines, each with a timestamp, any
+//! The Activity log: a word-wrapped list of lines, each with a timestamp, any
 //! one-shot buttons (Call now, Skip, Answer, Halt Tx) and an optional NEW chip.
 
 use std::collections::VecDeque;
@@ -202,7 +202,7 @@ impl LogView {
 
     /// First row height (embedded buttons and the NEW chip are taller than the text).
     fn first_row_h(f: &Fonts, l: &Line) -> f32 {
-        let mut h = f.mono.m.linespace;
+        let mut h = f.ui.m.linespace;
         if !l.buttons.is_empty() {
             h = h.max(btn_h(f));
         }
@@ -212,25 +212,35 @@ impl LogView {
         h
     }
 
+    /// The font a line's text is drawn in (the same proportional font as the Current Info card).
+    fn body<'a>(f: &'a Fonts, l: &Line) -> &'a crate::theme::Font {
+        if l.tag == Tag::Call { &f.ui_bold } else { &f.ui }
+    }
+
     /// Word-wrap like Tk's Text (wrap="word"): break after spaces, a word longer than a
     /// line is broken by character. Rows are char ranges of `l.text`.
-    fn wrap(l: &Line, avail: f32, prefix: f32, cw: f32) -> Vec<(usize, usize)> {
+    fn wrap(f: &Fonts, l: &Line, avail: f32, prefix: f32) -> Vec<(usize, usize)> {
         let chars: Vec<char> = l.text.chars().collect();
+        let pos = ui::positions(Self::body(f, l), &l.text);
         let mut rows = Vec::new();
         let mut start = 0usize;
-        let mut room = ((avail - prefix) / cw).floor().max(1.0) as usize;
-        let full = (avail / cw).floor().max(1.0) as usize;
+        let mut room = (avail - prefix).max(1.0);
+        let full = avail.max(1.0);
         while start < chars.len() {
-            if chars.len() - start <= room {
+            if pos[chars.len()] - pos[start] <= room {
                 rows.push((start, chars.len()));
                 break;
             }
-            // last space within room (the space may hang past the edge)
-            let limit = start + room;
+            // `limit` is the last boundary that fits; a space starting within the room may hang past the edge
+            let mut limit = start;
+            while limit < chars.len() && pos[limit] - pos[start] <= room {
+                limit += 1;
+            }
+            let limit = (limit - 1).max(start + 1);
             let mut brk = None;
-            let mut i = limit;
+            let mut i = limit.min(chars.len() - 1);
             while i > start {
-                if chars[i] == ' ' {
+                if chars[i] == ' ' && pos[i] - pos[start] <= room {
                     brk = Some(i + 1);
                     break;
                 }
@@ -282,11 +292,11 @@ impl LogView {
             let fresh = matches!(&l.laid, Some((w, _, _)) if *w == avail);
             if !fresh {
                 let prefix = Self::prefix_width(f, l, cw);
-                let rows = Self::wrap(l, avail, prefix, cw);
+                let rows = Self::wrap(f, l, avail, prefix);
                 l.laid = Some((avail, rows, Self::first_row_h(f, l)));
             }
             let (_, rows, h1) = l.laid.as_ref().unwrap();
-            heights.push(2.0 + h1 + (rows.len() as f32 - 1.0) * f.mono.m.linespace + 2.0);
+            heights.push(2.0 + h1 + (rows.len() as f32 - 1.0) * f.ui.m.linespace + 2.0);
         }
         heights
     }
@@ -315,12 +325,17 @@ impl LogView {
             if pos.y < y {
                 let (_, rows, h1) = l.laid.as_ref()?;
                 let rel = pos.y - (top + 2.0);
-                let ri = if rel < *h1 { 0 } else { (1 + ((rel - h1) / f.mono.m.linespace).floor() as usize).min(rows.len() - 1) };
+                let ri = if rel < *h1 { 0 } else { (1 + ((rel - h1) / f.ui.m.linespace).floor() as usize).min(rows.len() - 1) };
                 let (a, b) = rows[ri];
                 let origin = if ri == 0 { left + Self::prefix_width(f, l, cw) } else { left };
                 // the character under the pointer (the selection takes in every character it touches)
-                let col = (((pos.x - origin) / cw).floor().max(0.0) as usize).min((b - a).saturating_sub(1));
-                return Some((i, a + col));
+                let cp = ui::positions(Self::body(f, l), &l.text);
+                let dx = pos.x - origin;
+                let mut k = a;
+                while k + 1 < b && cp[k + 1] - cp[a] <= dx {
+                    k += 1;
+                }
+                return Some((i, k));
             }
         }
         let i = last?;
@@ -391,7 +406,7 @@ impl LogView {
         let content = 8.0 + heights.iter().sum::<f32>();
         let view = text_rect.height();
         let was_bottom = self.stick;
-        self.scroll.wheel(ui, text_rect, f.mono.m.linespace, content, view);
+        self.scroll.wheel(ui, text_rect, f.ui.m.linespace, content, view);
         let bar = Rect::from_min_max(Pos2::new(rect.right() - 12.0, rect.top() + 2.0), Pos2::new(rect.right() - 2.0, rect.bottom() - 2.0));
         let before = self.scroll.offset;
         self.scroll.bar(ui, Id::unique("log-bar"), bar, content, view, p);
@@ -422,7 +437,7 @@ impl LogView {
                     self.sel_ts.1 = Self::over_ts(pos, text_rect, cw);
                 }
                 // dragging past the edge scrolls
-                let step = if pos.y < text_rect.top() { -f.mono.m.linespace } else if pos.y > text_rect.bottom() { f.mono.m.linespace } else { 0.0 };
+                let step = if pos.y < text_rect.top() { -f.ui.m.linespace } else if pos.y > text_rect.bottom() { f.ui.m.linespace } else { 0.0 };
                 if step != 0.0 {
                     self.scroll.offset += step;
                     self.stick = false;
@@ -458,9 +473,11 @@ impl LogView {
             }
             let (_, rows, h1) = l.laid.as_ref().unwrap();
             let line_top = top + 2.0;
-            let font = if l.tag == Tag::Call { &f.mono_bold } else { &f.mono };
+            let font = Self::body(f, l);
+            let cp = ui::positions(font, &l.text);
             let color = p.log(log_tag(l.tag));
-            let text_top = line_top + ((h1 - f.mono.m.linespace) / 2.0).floor();
+            let text_top = line_top + ((h1 - f.ui.m.linespace) / 2.0).floor();
+            let ts_top = text_top + ((f.ui.m.linespace - f.mono.m.linespace) / 2.0).floor();
             let left = text_rect.left() + 12.0;
             // the selected span of this line's text (char range), and whether the
             // timestamp is in it
@@ -474,9 +491,9 @@ impl LogView {
             };
             let ts_bg = if ts_sel { p.select } else { p.surface };
             if ts_sel {
-                painter.rect_filled(Rect::from_min_size(Pos2::new(left, text_top), Vec2::new(l.ts.chars().count() as f32 * cw, f.mono.m.linespace)), 0.0, ts_bg);
+                painter.rect_filled(Rect::from_min_size(Pos2::new(left, ts_top), Vec2::new(l.ts.chars().count() as f32 * cw, f.mono.m.linespace)), 0.0, ts_bg);
             }
-            ui::text_on(ui, &painter, Pos2::new(left, text_top), &l.ts, &f.mono, p.log(LogTag::Ts), ts_bg);
+            ui::text_on(ui, &painter, Pos2::new(left, ts_top), &l.ts, &f.mono, p.log(LogTag::Ts), ts_bg);
             let mut x = left + 10.0 * cw;
             for b in l.buttons.iter().filter(|b| !is_trailing(b)) {
                 let w = measure_btn(f, b.label);
@@ -496,7 +513,7 @@ impl LogView {
             }
             let chars: Vec<char> = l.text.chars().collect();
             for (ri, &(a, b)) in rows.iter().enumerate() {
-                let (rx, ry) = if ri == 0 { (x, text_top) } else { (left, line_top + h1 + (ri as f32 - 1.0) * f.mono.m.linespace) };
+                let (rx, ry) = if ri == 0 { (x, text_top) } else { (left, line_top + h1 + (ri as f32 - 1.0) * f.ui.m.linespace) };
                 // unselected / selected / unselected pieces of the row
                 let m1 = sel_s.clamp(a, b);
                 let m2 = sel_e.clamp(a, b).max(m1);
@@ -505,10 +522,10 @@ impl LogView {
                         continue;
                     }
                     let s: String = chars[from..to].iter().collect();
-                    let px = rx + (from - a) as f32 * cw;
+                    let px = rx + cp[from] - cp[a];
                     let bg = if selected { p.select } else { p.surface };
                     if selected {
-                        painter.rect_filled(Rect::from_min_size(Pos2::new(px, ry), Vec2::new((to - from) as f32 * cw, f.mono.m.linespace)), 0.0, bg);
+                        painter.rect_filled(Rect::from_min_size(Pos2::new(px, ry), Vec2::new(cp[to] - cp[from], f.ui.m.linespace)), 0.0, bg);
                     }
                     let trimmed = s.trim_end_matches(' ');
                     if !trimmed.is_empty() {
@@ -520,9 +537,9 @@ impl LogView {
             if l.buttons.iter().any(is_trailing) {
                 let n = rows.len().saturating_sub(1);
                 let (a, b) = rows.get(n).copied().unwrap_or((0, 0));
-                let (rx, ry) = if n == 0 { (x, text_top) } else { (left, line_top + h1 + (n as f32 - 1.0) * f.mono.m.linespace) };
+                let (rx, ry) = if n == 0 { (x, text_top) } else { (left, line_top + h1 + (n as f32 - 1.0) * f.ui.m.linespace) };
                 let shown: String = chars[a..b].iter().collect();
-                let mut tx = rx + shown.trim_end_matches(' ').chars().count() as f32 * cw + cw;
+                let mut tx = rx + cp[a + shown.trim_end_matches(' ').chars().count()] - cp[a] + cw;
                 let by = if n == 0 { line_top + ((h1 - btn_h(f)) / 2.0).floor() } else { ry - 1.0 };
                 for b in l.buttons.iter().filter(|b| is_trailing(b)) {
                     let w = measure_btn(f, b.label);
