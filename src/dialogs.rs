@@ -18,6 +18,12 @@ pub enum DialogKind {
     PresenceExpired(String),
     /// the Radio tab's CAT test: passed or not, and one line per item
     CatResult(bool, Vec<String>),
+    /// Settings > About > Check now (or the header version): already on the latest release
+    UpToDate(String),
+    /// a newer release exists (its version); offers Update now / Cancel
+    UpdateAvail(String),
+    /// the update check failed (the reason)
+    CheckFailed(String),
 }
 
 impl DialogKind {
@@ -104,6 +110,16 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             }
             (title.into(), head.into(), color, v)
         }
+        DialogKind::UpToDate(v) => ("Up to date".into(), "You're up to date".into(), p.on, vec![
+            para(&format!("Version {v} is the latest release."), &f.ui, p.text, 8.0),
+        ]),
+        DialogKind::UpdateAvail(v) => ("Update available".into(), format!("Version {v} is available"), p.blue, vec![
+            para(&format!("You are running version {}.", env!("CARGO_PKG_VERSION")), &f.ui, p.text, 8.0),
+            para("Update now downloads the new version, swaps it in and restarts the app. The app closes normally first. It won't update while a QSO or an Auto mode is active.", &f.ui, p.text, 8.0),
+        ]),
+        DialogKind::CheckFailed(e) => ("Update check failed".into(), "Couldn't check for updates".into(), p.bad, vec![
+            para(e, &f.ui, p.text, 8.0),
+        ]),
         DialogKind::PresenceExpired(names) => ("Auto modes disabled".into(), format!("{names} switched off"), p.bad, vec![
             para("You did not confirm that you were at the station in time. Fully automated QSOs are prohibited, so the Auto modes are switched off whenever nobody answers.", &f.ui, p.text, 8.0),
             para("Calls already in progress in WSJT-X are left alone. You can switch the Auto modes back on yourself; that starts a fresh timer.", &f.ui, p.text, 8.0),
@@ -131,12 +147,17 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
             Some(Rnd::new("Cancel", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
             0.0,
         ),
+        DialogKind::UpdateAvail(_) => (
+            Some(Rnd::new("Update now", ui_bold).pill().pad(18.0, 7.0).colors(p.blue, p.blue_text).hover(p.blue_hover)),
+            Some(Rnd::new("Cancel", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
+            0.0,
+        ),
         DialogKind::PresenceAsk => (
             Some(Rnd::new("Yes, I'm still here", ui_bold).pill().pad(22.0, 8.0).colors(p.on, Color32::WHITE).hover(p.on_hover)),
             None,
             16.0 + 120.0,
         ),
-        DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) => (
+        DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) | DialogKind::UpToDate(_) | DialogKind::CheckFailed(_) => (
             Some(Rnd::new("OK", ui_bold).pill().pad(28.0, 8.0).colors(p.accent, p.accent_text).hover(p.accent_hover)),
             None,
             0.0,
@@ -196,7 +217,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
         }
         let right = full.right() - 24.0;
         match kind {
-            DialogKind::ConfirmHunt | DialogKind::ConfirmCq => {
+            DialogKind::ConfirmHunt | DialogKind::ConfirmCq | DialogKind::UpdateAvail(_) => {
                 y += 20.0;
                 let (e, c) = (b1.as_ref().unwrap(), b2.as_ref().unwrap());
                 let es = e.size(ui);
@@ -235,7 +256,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);
                 }
             }
-            DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) => {
+            DialogKind::PresenceExpired(_) | DialogKind::CatResult(..) | DialogKind::UpToDate(_) | DialogKind::CheckFailed(_) => {
                 y += 16.0;
                 let b = b1.as_ref().unwrap();
                 let bs = b.size(ui);
@@ -243,8 +264,8 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
                 if b.show(ui, Id::unique("dlg-ok"), br, true).clicked() {
                     outcome = Outcome::Closed;
                 }
-                let is_cat = matches!(kind, DialogKind::CatResult(..));
-                if is_cat && ui.input(|i| i.key_pressed(Key::Escape) || i.key_pressed(Key::Enter) || i.viewport().close_requested()) {
+                let easy_close = !matches!(kind, DialogKind::PresenceExpired(_));
+                if easy_close && ui.input(|i| i.key_pressed(Key::Escape) || i.key_pressed(Key::Enter) || i.viewport().close_requested()) {
                     outcome = Outcome::Closed;
                 } else if ui.input(|i| i.viewport().close_requested()) {
                     ui.ctx().send_viewport_cmd(egui::ViewportCommand::CancelClose);

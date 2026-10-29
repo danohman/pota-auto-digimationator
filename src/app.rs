@@ -792,6 +792,7 @@ impl App {
                 },
                 dialogs::Outcome::StillHere => {
                     self.presence.arm();
+                    DialogKind::UpdateAvail(_) => self.start_update(),
                     self.log("Presence confirmed; Auto modes stay on.", Tag::Hunt);
                 }
                 dialogs::Outcome::Expired => self.presence_expired(),
@@ -1253,6 +1254,9 @@ impl App {
                 self.update_busy = false;
                 match r {
                     Ok(Some(rel)) => {
+                        if manual && self.dialog.is_none() {
+                            self.dialog = Some(Dialog::new(DialogKind::UpdateAvail(rel.version.clone())));
+                        }
                         self.update_ok = true;
                         self.update_note = None;
                         self.update = Some(rel);
@@ -1260,10 +1264,21 @@ impl App {
                     Ok(None) => {
                         self.update_ok = true;
                         self.update = None;
-                        self.update_note = manual.then(|| (format!("Version {} is the latest", env!("CARGO_PKG_VERSION")), false));
+                        self.update_note = None;
+                        if manual && self.dialog.is_none() {
+                            self.dialog = Some(Dialog::new(DialogKind::UpToDate(env!("CARGO_PKG_VERSION").to_string())));
+                        }
                     }
                     // a failed background check stays quiet; the user asking sees why
-                    Err(e) => self.update_note = manual.then(|| (format!("Update check failed: {e}"), true)),
+                    Err(e) => {
+                        if manual {
+                            if self.dialog.is_none() {
+                                self.dialog = Some(Dialog::new(DialogKind::CheckFailed(e.to_string())));
+                            } else {
+                                self.update_note = Some((format!("Update check failed: {e}"), true));
+                            }
+                        }
+                    }
                 }
             }
             Event::UpdateDone(r) => {
@@ -2170,7 +2185,6 @@ impl App {
             let status = match (&new, self.update_busy, self.update_ok) {
                 (Some(_), true, _) => Some("downloading..."),
                 (None, true, _) => Some("checking..."),
-                (None, false, true) => Some("up to date"),
                 _ => None,
             };
             match (new.filter(|_| !self.update_busy), status) {
