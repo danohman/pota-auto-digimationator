@@ -40,22 +40,32 @@ pub struct Release {
     pub exe_sha: Option<Asset>,
 }
 
-/// The numeric parts of "v1.2.3" (anything after a '-' or '+' is ignored), or None.
-fn parse_version(v: &str) -> Option<Vec<u64>> {
+/// The numeric parts of "v1.2.3" and its pre-release tag ("beta" of "1.2.3-beta", "" for a
+/// final release; build metadata after '+' is ignored), or None.
+fn parse_version(v: &str) -> Option<(Vec<u64>, String)> {
     let v = v.trim().trim_start_matches('v');
-    let v = v.split(['-', '+']).next()?;
-    let parts: Option<Vec<u64>> = v.split('.').map(|p| p.parse().ok()).collect();
-    parts.filter(|p| !p.is_empty())
+    let v = v.split('+').next()?;
+    let (nums, pre) = v.split_once('-').unwrap_or((v, ""));
+    let parts: Option<Vec<u64>> = nums.split('.').map(|p| p.parse().ok()).collect();
+    parts.filter(|p| !p.is_empty()).map(|p| (p, pre.to_string()))
 }
 
-/// Is `latest` a higher version than `current`?
+/// Is `latest` a higher version than `current`? A pre-release ranks below its own final
+/// release (1.0.2-beta < 1.0.2).
 pub fn is_newer(latest: &str, current: &str) -> bool {
     match (parse_version(latest), parse_version(current)) {
-        (Some(mut a), Some(mut b)) => {
+        (Some((mut a, pa)), Some((mut b, pb))) => {
             let n = a.len().max(b.len());
             a.resize(n, 0);
             b.resize(n, 0);
-            a > b
+            if a != b {
+                return a > b;
+            }
+            match (pa.is_empty(), pb.is_empty()) {
+                (true, false) => true,
+                (false, true) => false,
+                _ => pa > pb,
+            }
         }
         _ => false,
     }
@@ -224,6 +234,10 @@ mod tests {
         assert!(!is_newer("0.9.9", "1.0.0"));
         assert!(!is_newer("nightly", "1.0.0"));
         assert!(is_newer("1.1.0-beta", "1.0.0"));
+        assert!(is_newer("1.0.2", "1.0.2-beta"));
+        assert!(!is_newer("1.0.2-beta", "1.0.2"));
+        assert!(!is_newer("1.0.2-beta", "1.0.2-beta"));
+        assert!(is_newer("1.0.2-beta2", "1.0.2-beta1"));
     }
 
     const SAMPLE: &str = r#"{"tag_name":"v1.2.0","html_url":"https://github.com/o/r/releases/tag/v1.2.0","assets":[
