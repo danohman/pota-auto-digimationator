@@ -323,13 +323,15 @@ pub enum ActionKind {
     HaltTx,
     CallNow { cand: Candidate, received: f64 },
     Answer { decode: Decode, call: String, received: f64 },
+    /// the give-up count restarts at 1 for another round of calls
+    KeepCalling { call: String },
 }
 
 impl ActionKind {
     /// The station a button is about (None for Halt Tx).
     pub fn call(&self) -> Option<&str> {
         match self {
-            ActionKind::Skip { call, .. } | ActionKind::Answer { call, .. } => Some(call),
+            ActionKind::Skip { call, .. } | ActionKind::Answer { call, .. } | ActionKind::KeepCalling { call } => Some(call),
             ActionKind::CallNow { cand, .. } => Some(&cand.call),
             ActionKind::HaltTx => None,
         }
@@ -458,6 +460,9 @@ pub struct Hunter {
     pub known_ref: HashMap<String, (String, String)>,
     /// base_call -> clock deadline
     pub cooloff: HashMap<String, f64>,
+    /// base_call -> clock deadline: the operator halted Tx on this station; a fresh CQ/73 from it
+    /// is offered (Call now / Skip) but never called automatically
+    pub halted: HashMap<String, f64>,
     /// the operator skipped these today
     pub skipped: HashSet<SkipKey>,
     /// base_call -> (target we let go of, deadline); see set_target
@@ -544,6 +549,7 @@ impl Hunter {
             pota_cq_seen: HashSet::new(),
             known_ref: HashMap::new(),
             cooloff: HashMap::new(),
+            halted: HashMap::new(),
             skipped: HashSet::new(),
             recent: HashMap::new(),
             gave_up: HashMap::new(),
@@ -1016,10 +1022,21 @@ impl Hunter {
             ActionKind::Skip { call, ref_ } => self.skip(call, Some(ref_)),
             ActionKind::HaltTx => self.halt_tx(),
             ActionKind::CallNow { cand, received } => self.call_candidate(cand, *received),
+            ActionKind::KeepCalling { call } => self.keep_calling(call),
             ActionKind::Answer { decode, call, received } => {
                 self.answer_caller(decode, call, *received, "you clicked Answer")
             }
         }
+    }
+
+    /// The operator clicked Keep calling: start another round of calls (count back to 1).
+    fn keep_calling(&mut self, call: &str) {
+        let max = self.max_attempts();
+        let Some(t) = self.target_.as_mut().filter(|t| t.call == call && !t.completed) else { return };
+        t.attempts = 1;
+        t.idle_since = 0.0;
+        let call = t.call.clone();
+        self.log(format!("Calling {call} again: another round of up to {max} calls"), Tag::Info);
     }
 
     /// Stop WSJT-X transmitting without skipping the station.
@@ -1028,6 +1045,21 @@ impl Hunter {
         if let Err(e) = self.halt(&id) {
             self.log(format!("Could not halt Tx: {e}"), Tag::Error);
             return;
+        }
+        // remember who we were calling: its next CQ or 73 is offered again, not ignored
+        let call = self.target_.as_ref().map(|t| t.call.clone()).or_else(|| {
+            self.status.as_ref().filter(|s| !s.dx_call.is_empty()).map(|s| base_call(&s.dx_call))
+        });
+        if let Some(call) = call {
+            let until = self.now() + Self::COOLOFF_SECONDS;
+            self.halted.insert(call, until);
+        }
+        // A call we started ourselves is dropped here: left as the target, the sign-off
+        // resend would turn Enable Tx straight back on once the next Status shows Tx off.
+        if self.target_.as_ref().is_some_and(|t| !t.answered) {
+            let call = self.target_.as_ref().map(|t| t.call.clone()).unwrap_or_default();
+            self.cooloff.insert(call, self.now() + Self::COOLOFF_SECONDS);
+            self.set_target(None);
         }
         self.log("Tx halted", Tag::Error);
     }
@@ -1065,6 +1097,7 @@ impl Hunter {
             self.recent.clear();
             self.pota_cq_seen.clear();
             self.cooloff.clear();
+            self.halted.clear();
             self.gave_up.clear();
             self.dupe_logged.clear();
             self.log(format!("0000Z: new UTC day {}, worked list cleared", today.format("%Y-%m-%d")), Tag::Info);
@@ -1161,7 +1194,15 @@ impl Hunter {
             t.tx_started = self.now();
             if waiting {
                 let verb = if t.replying { "Answering" } else { "Calling" };
-                let buttons = Self::qso_buttons(&t.call, &t.ref_, true);
+                let mut buttons = Self::qso_buttons(&t.call, &t.ref_, true);
+                if t.attempts >= max {
+                    // the last call of the round: offer another round
+                    buttons.push(Action {
+                        label: "Keep calling",
+                        kind: ActionKind::KeepCalling { call: t.call.clone() },
+                        active: Some(Active::QsoRunning(t.call.clone())),
+                    });
+                }
                 self.log_with(format!("{verb} {} ({}/{max})", t.call, t.attempts), Tag::Call, buttons, false);
             }
         }
@@ -1176,8 +1217,8 @@ impl Hunter {
                 if t.idle_since == 0.0 && (t.tx_started == 0.0 || now - t.tx_started < 0.6 * period) {
                     // WSJT-X ends its own Tx at the end of the period; one cut short means
                     // the operator halted it, so don't turn it back on.
-                    self.log(format!("Tx stopped early; letting go of {}", t.call), Tag::Error);
                     self.cooloff.insert(t.call.clone(), now + Self::COOLOFF_SECONDS);
+                    self.halted.insert(t.call.clone(), now + Self::COOLOFF_SECONDS);
                     self.target_ = Some(t);
                     self.set_target(None);
                     return;
@@ -1356,7 +1397,9 @@ impl Hunter {
         if !earlier.is_empty() {
             reason += &format!(", new park (worked at {} earlier today)", earlier.join(", "));
         }
-        if self.cooloff.get(&call).copied().unwrap_or(0.0) > now || self.target_.as_ref().is_some_and(|t| t.call == call) {
+        // After the operator halted Tx on a station, its next CQ or 73 is offered, not called
+        let offer_only = self.halted.get(&call).copied().unwrap_or(0.0) > now && self.target_.as_ref().is_none_or(|t| t.call != call);
+        if !offer_only && (self.cooloff.get(&call).copied().unwrap_or(0.0) > now || self.target_.as_ref().is_some_and(|t| t.call == call)) {
             if self.enabled {
                 self.call_again(d, &call, &p, &ref_, &park);
             }
@@ -1412,9 +1455,11 @@ impl Hunter {
             ref_: ref_.clone(),
             park: park.clone(),
         };
-        self.pending.push(cand.clone());
-        if new || !self.new_parks_only {
-            self.wanted_ready = true;
+        if !offer_only {
+            self.pending.push(cand.clone());
+            if new || !self.new_parks_only {
+                self.wanted_ready = true;
+            }
         }
         // The operator can always call a candidate right now, switching from any target.
         let received = self.now();
@@ -1507,6 +1552,7 @@ impl Hunter {
         }
         self.pending.retain(|c| c.id != cand.id);
         self.cooloff.remove(call);
+        self.halted.remove(call);
         let mut t = Target::new(call, &self.band_s(), &self.mode(), self.now());
         t.ref_ = cand.ref_.clone();
         t.park = cand.park.clone();

@@ -731,7 +731,7 @@ fn halting_tx_mid_call_is_not_undone() {
     s.hs(st_tx(false, false, "N5XYZ"));
     assert!(s.h.target().is_none());
     assert_eq!(s.n_replies(), 1);
-    assert!(s.logged("Tx stopped early"));
+    assert!(s.h.target().is_none());
 }
 
 #[test]
@@ -1453,7 +1453,53 @@ fn fresh_signoff_after_halt_tx_is_not_called() {
     s.hs(st_tx(true, true, "N5XYZ"));
     s.adv(4.0);
     s.hs(st_tx(false, false, "N5XYZ"));
-    assert!(s.logged("Tx stopped early"));
+    assert!(s.h.target().is_none());
     s.cycle(&[dec_at("W3ABC N5XYZ RR73", 10, 10_530_000)]);
     assert_eq!(s.n_replies(), 1);
+}
+
+#[test]
+fn fresh_cq_after_halt_tx_is_offered_not_called() {
+    let mut s = T::new();
+    s.cycle(&[dec("W1AW N5XYZ 73")]);
+    s.hs(st_tx(true, true, "N5XYZ"));
+    s.adv(4.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.cycle(&[dec_at("W3ABC N5XYZ RR73", 10, 10_530_000)]);
+    assert_eq!(s.n_replies(), 1); // not called again by Auto-Hunt
+    assert!(s.logged("N5XYZ (RR73)")); // but offered, with Call now
+    assert!(s.h.pending.is_empty());
+}
+
+#[test]
+fn halt_tx_on_a_station_we_called_is_not_resent() {
+    let mut s = T::new();
+    s.cycle(&[dec("W1AW N5XYZ 73")]);
+    s.hs(st_tx(true, true, "N5XYZ"));
+    s.adv(13.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.adv(4.0);
+    s.h.halt_tx();
+    let before = s.n_replies();
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.adv(4.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    assert_eq!(s.n_replies(), before); // Enable Tx stays off
+    assert!(s.h.target().is_none());
+}
+
+#[test]
+fn keep_calling_restarts_the_count() {
+    let mut s = T::new();
+    s.h.set_max_attempts(2);
+    s.cycle(&[dec("W1AW N5XYZ 73")]);
+    s.hs(st_tx(true, true, "N5XYZ"));
+    s.adv(13.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.adv(4.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.hs(st_tx(true, true, "N5XYZ"));
+    assert_eq!(s.h.target().unwrap().attempts, 2);
+    s.h.perform(&ActionKind::KeepCalling { call: "N5XYZ".into() });
+    assert_eq!(s.h.target().unwrap().attempts, 1);
 }

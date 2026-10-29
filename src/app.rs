@@ -104,7 +104,11 @@ impl HunterIo for AppIo {
     }
 
     fn send_halt(&mut self, id: &str) -> Result<(), String> {
-        self.listener.lock().unwrap().send(&wsjtx_udp::build_halt_tx(id, false))
+        // auto_only=true unticks Enable Tx (the plain halt leaves it ticked while receiving);
+        // auto_only=false stops a transmission in progress
+        let l = self.listener.lock().unwrap();
+        l.send(&wsjtx_udp::build_halt_tx(id, true))?;
+        l.send(&wsjtx_udp::build_halt_tx(id, false))
     }
 
     fn can_send_text(&self) -> bool {
@@ -1984,12 +1988,15 @@ impl App {
         for b in self.log.buttons_mut() {
             let Some(a) = &b.active else { continue };
             let on = h.is_active(a);
-            if b.label == "Halt Tx" && !on {
-                remove.push(b.id); // no QSO in progress: no Halt Tx button
+            if (b.label == "Halt Tx" || b.label == "Keep calling") && !on {
+                remove.push(b.id); // no QSO in progress: no Halt Tx / Keep calling button
                 continue;
             }
             if b.label == "Skip" && h.has_answered(a) {
                 remove.push(b.id); // they answered us: no point skipping them any more
+            if b.label == "Keep calling" {
+                continue; // stays green, never glows
+            }
                 continue;
             }
             if b.used {

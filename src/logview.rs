@@ -19,6 +19,8 @@ pub fn action_tip(label: &str) -> &'static str {
         "Call now" => "Reply to this CQ right away, switching from\nany station you're calling now",
         "Skip" => "Never call this station again today (this band,\nmode and park). Stops transmitting if it's\nthe one being called",
         "Answer" => "Reply to this station that is calling you",
+        "Keep calling" => "Start another round of calls to this station
+(the count goes back to 1)",
         "Halt Tx" => "Stop transmitting now. The station is not skipped,\nso it can be called again",
         _ => "",
     }
@@ -186,7 +188,9 @@ impl LogView {
     fn prefix_width(f: &Fonts, l: &Line, cw: f32) -> f32 {
         let mut w = 10.0 * cw; // "HH:MM:SS  "
         for b in &l.buttons {
-            w += measure_btn(f, b.label) + cw;
+            if !is_trailing(b) {
+                w += measure_btn(f, b.label) + cw;
+            }
         }
         if l.new {
             w += measure_btn(f, "NEW") + cw;
@@ -443,35 +447,10 @@ impl LogView {
             }
             ui::text_on(ui, &painter, Pos2::new(left, text_top), &l.ts, &f.mono, p.log(LogTag::Ts), ts_bg);
             let mut x = left + 10.0 * cw;
-            for b in &l.buttons {
+            for b in l.buttons.iter().filter(|b| !is_trailing(b)) {
                 let w = measure_btn(f, b.label);
                 let r = Rect::from_min_size(Pos2::new(x, line_top + ((h1 - btn_h(f)) / 2.0).floor()), Vec2::new(w, btn_h(f)));
-                let (fill, fg, hover) = if b.used {
-                    (p.disabled_btn.0, p.disabled_btn.1, None)
-                } else if b.glowing {
-                    (b.glow_fill, p.text, Some(b.glow_fill))
-                } else {
-                    (p.accent, p.accent_text, Some(p.accent_hover))
-                };
-                let mut rnd = Rnd::new(b.label, &f.ui_bold).pill().pad(9.0, 1.0).colors(fill, fg);
-                if let Some(h) = hover {
-                    rnd = rnd.hover(h);
-                }
-                let visible = r.intersect(text_rect);
-                if visible.height() > 0.0 && hover_ok {
-                    let resp = ui.interact(visible, Id::unique(("logbtn", b.id)), eframe::egui::Sense::click());
-                    let hovered = !b.used && resp.hovered();
-                    if hovered {
-                        ui.ctx().set_cursor_icon(eframe::egui::CursorIcon::PointingHand);
-                    }
-                    rnd.paint(ui, &painter, r, hovered);
-                    tips.tip(&resp, action_tip(b.label), 300, TipAt::Below(r));
-                    if resp.clicked() && !b.used {
-                        clicked = Some(LogClick::Button(b.id));
-                    }
-                } else {
-                    rnd.paint(ui, &painter, r, false);
-                }
+                paint_button(ui, &painter, f, p, tips, hover_ok, text_rect, b, r, &mut clicked);
                 x += w + cw;
             }
             if l.new {
@@ -518,3 +497,55 @@ pub fn btn_h(f: &Fonts) -> f32 {
 pub fn measure_btn(f: &Fonts, label: &str) -> f32 {
     measure(&f.ui_bold, label) + 18.0
 }
+            // buttons that follow the text (Keep calling), after the end of the last row
+            if l.buttons.iter().any(is_trailing) {
+                let n = rows.len().saturating_sub(1);
+                let (a, b) = rows.get(n).copied().unwrap_or((0, 0));
+                let (rx, ry) = if n == 0 { (x, text_top) } else { (left, line_top + h1 + (n as f32 - 1.0) * f.mono.m.linespace) };
+                let shown: String = chars[a..b].iter().collect();
+                let mut tx = rx + shown.trim_end_matches(' ').chars().count() as f32 * cw + cw;
+                let by = if n == 0 { line_top + ((h1 - btn_h(f)) / 2.0).floor() } else { ry - 1.0 };
+                for b in l.buttons.iter().filter(|b| is_trailing(b)) {
+                    let w = measure_btn(f, b.label);
+                    let r = Rect::from_min_size(Pos2::new(tx, by), Vec2::new(w, btn_h(f)));
+                    paint_button(ui, &painter, f, p, tips, hover_ok, text_rect, b, r, &mut clicked);
+                    tx += w + cw;
+                }
+            }
+/// Buttons drawn after the line's text instead of before it.
+fn is_trailing(b: &LogButton) -> bool {
+    b.label == "Keep calling"
+}
+
+#[allow(clippy::too_many_arguments)]
+fn paint_button(ui: &Ui, painter: &eframe::egui::Painter, f: &Fonts, p: &Palette, tips: &mut Tips, hover_ok: bool, text_rect: Rect, b: &LogButton, r: Rect, clicked: &mut Option<LogClick>) {
+    let (fill, fg, hover) = if b.used {
+        (p.disabled_btn.0, p.disabled_btn.1, None)
+    } else if b.glowing {
+        (b.glow_fill, p.text, Some(b.glow_fill))
+    } else if b.label == "Keep calling" {
+        (p.on, Color32::WHITE, Some(p.on_hover))
+    } else {
+        (p.accent, p.accent_text, Some(p.accent_hover))
+    };
+    let mut rnd = Rnd::new(b.label, &f.ui_bold).pill().pad(9.0, 1.0).colors(fill, fg);
+    if let Some(h) = hover {
+        rnd = rnd.hover(h);
+    }
+    let visible = r.intersect(text_rect);
+    if visible.height() > 0.0 && hover_ok {
+        let resp = ui.interact(visible, Id::unique(("logbtn", b.id)), eframe::egui::Sense::click());
+        let hovered = !b.used && resp.hovered();
+        if hovered {
+            ui.ctx().set_cursor_icon(eframe::egui::CursorIcon::PointingHand);
+        }
+        rnd.paint(ui, painter, r, hovered);
+        tips.tip(&resp, action_tip(b.label), 300, TipAt::Below(r));
+        if resp.clicked() && !b.used {
+            *clicked = Some(LogClick::Button(b.id));
+        }
+    } else {
+        rnd.paint(ui, painter, r, false);
+    }
+}
+
