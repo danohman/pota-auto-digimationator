@@ -2800,9 +2800,9 @@ impl App {
         let hc = f.heading.m.linespace + 4.0;
         let hy = self.card_head(ui, Card::Notices, rect, hc);
         let hx = inner.left() + PAD + 2.0;
-        let x = self.card_title(ui, hx, hy, hc, "POTA Spots (New to me) [on other band/mode]");
         let total = self.notices.iter().map(|n| n.2).sum::<usize>().to_string();
-        self.pill(ui, x + 8.0, hy, hc, &total, "new-count");
+        let px = self.pill(ui, hx, hy, hc, &total, "new-count");
+        self.card_title(ui, px + 6.0, hy, hc, "POTA Spots (New to me) [on other band/mode]");
         self.pop_button(ui, Card::Notices, inner, hy, hc);
         let (wraps, _) = self.notices_layout(ui, rect.width());
         let rowh = f.ui_bold.m.linespace + 2.0;
@@ -2865,9 +2865,9 @@ impl App {
         let hy0 = self.card_head(ui, Card::Spots, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.spots_title.clone();
-        let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.spots_count.clone();
-        self.pill(ui, x + 8.0, hy, hc, &count, "spots-count");
+        let px = self.pill(ui, hx, hy, hc, &count, "spots-count");
+        self.card_title(ui, px + 6.0, hy, hc, &title);
         self.pop_button(ui, Card::Spots, inner, hy, hc);
         let top = hy + hc + 9.0;
         let table_rect = Rect::from_min_max(Pos2::new(inner.left(), top), inner.max);
@@ -2944,9 +2944,9 @@ impl App {
         let hy0 = self.card_head(ui, Card::Done, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = self.done_title.clone();
-        let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.done_count.clone();
-        self.pill(ui, x + 8.0, hy, hc, &count, "done-count");
+        let px = self.pill(ui, hx, hy, hc, &count, "done-count");
+        self.card_title(ui, px + 6.0, hy, hc, &title);
         self.pop_button(ui, Card::Done, inner, hy, hc);
         let table_rect = Rect::from_min_max(Pos2::new(inner.left(), hy + hc + 9.0), inner.max);
         let colors = self.row_colors();
@@ -2968,9 +2968,9 @@ impl App {
         let hy0 = self.card_head(ui, Card::Worked, rect, hc);
         let (hx, hy) = (inner.left() + PAD + 2.0, hy0);
         let title = format!("Worked today ({})", Utc::now().format("%Y-%m-%d"));
-        let x = self.card_title(ui, hx, hy, hc, &title);
         let count = self.worked_count.clone();
-        let x = self.pill(ui, x + 8.0, hy, hc, &count, "worked-count");
+        let px = self.pill(ui, hx, hy, hc, &count, "worked-count");
+        let x = self.card_title(ui, px + 6.0, hy, hc, &title);
         let lh = f.small.m.linespace + 4.0;
         let day_left = self.day_left.clone();
         let day_w = measure(&f.small, &day_left);
