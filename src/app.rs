@@ -378,6 +378,8 @@ pub struct App {
     demo_tip: bool,
     /// WSJT-X has reported a band since start-up: the waiting popup is gone for good
     wsjtx_seen: bool,
+    /// a decode has arrived since WSJT-X connected (the spinner stays until one does)
+    wsjtx_decoded: bool,
     /// the setup wizard, while it is showing (first run, or re-run from Settings)
     pub wizard: Option<crate::panel::Wizard>,
     /// first run: settings.json does not exist yet, nothing is written until the wizard finishes
@@ -609,6 +611,7 @@ impl App {
             demo: std::env::var("POTA_DEMO").map(|v| v.split(',').map(str::to_string).collect()).unwrap_or_default(),
             demo_tip: false,
             wsjtx_seen: false,
+            wsjtx_decoded: false,
             wizard: None,
             unsaved: first_run,
         };
@@ -1162,6 +1165,7 @@ impl App {
                         self.rig_watch();
                     }
                     Message::Decode(d) => {
+                        self.wsjtx_decoded = true;
                         self.h.handle_decode(&d);
                         self.record_heard(&d);
                         self.flash_heard(&d);
@@ -2495,7 +2499,7 @@ impl App {
         let mut tips = std::mem::take(&mut self.tips);
         let click = self.log.show(ui, body, &p, &f, &mut tips);
         self.tips = tips;
-        if !self.wsjtx_seen && self.h.band().is_none() {
+        if self.waiting_for_wsjtx() {
             self.list_overlay(ui, rect, "Waiting for a WSJT-X decode...", true);
         }
         if self.log.has_selection() {
@@ -2915,19 +2919,25 @@ impl App {
         painter.add(egui::Shape::line(pts, Stroke::new(7.0, self.p.accent)));
     }
 
-    /// True from start-up until WSJT-X's first Status, then never again (user request
-    /// 2026-10-29: informational only; the big spinner sits inside the Activity card and
-    /// blocks nothing, only the Auto toggles are refused until WSJT-X has been heard).
-    fn wsjtx_waiting(&mut self, ctx: &egui::Context) -> bool {
-        if self.wsjtx_seen {
-            return false;
-        }
+    /// True while no WSJT-X is talking to us: from start-up until its first Status, and
+    /// again after it closes (a Close message) or goes quiet for 35 s (user request
+    /// 2026-10-29). Informational only: the big spinner sits inside the Activity card and
+    /// blocks nothing; the Auto toggles are refused until WSJT-X has been heard once.
+    fn waiting_for_wsjtx(&self) -> bool {
+        let demo_skip = !self.demo.is_empty() && !self.demo.iter().any(|s| s == "wait");
+        !demo_skip && !(self.connected() && self.wsjtx_decoded)
+    }
+
+    fn wsjtx_waiting(&mut self, ctx: &egui::Context) {
         if self.h.band().is_some() {
             self.wsjtx_seen = true;
-            return false;
         }
-        ctx.request_repaint_after(Duration::from_millis(40));
-        true
+        if !self.last_wsjtx.is_some_and(|t| t.elapsed().as_secs_f64() < 35.0) {
+            self.wsjtx_decoded = false; // closed or silent: wait for a decode again
+        }
+        if self.waiting_for_wsjtx() {
+            ctx.request_repaint_after(Duration::from_millis(40));
+        }
     }
 
     fn draw_done_card(&mut self, ui: &mut Ui, rect: Rect) {
