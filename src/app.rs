@@ -1563,9 +1563,9 @@ impl App {
                 notes.push("Dry run");
             }
             let text = if notes.is_empty() { HUNT_ON_TEXT.to_string() } else { format!("{HUNT_ON_TEXT} ({})", notes.join(", ")) };
-            (text, p.on, p.on_hover)
+            (text, p.off, p.off_hover)
         } else {
-            (HUNT_OFF_TEXT.into(), p.off, p.off_hover)
+            (HUNT_OFF_TEXT.into(), p.on, p.on_hover)
         }
     }
 
@@ -1573,9 +1573,9 @@ impl App {
         let p = &self.p;
         if self.h.cq_enabled {
             let text = format!("{CQ_ON_TEXT}{}", if self.h.dry_run { " (Dry run)" } else { "" });
-            (text, p.on, p.on_hover)
+            (text, p.off, p.off_hover)
         } else {
-            (CQ_OFF_TEXT.into(), p.off, p.off_hover)
+            (CQ_OFF_TEXT.into(), p.on, p.on_hover)
         }
     }
 
