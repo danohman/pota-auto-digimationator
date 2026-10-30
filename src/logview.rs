@@ -406,9 +406,9 @@ impl LogView {
         let content = 8.0 + heights.iter().sum::<f32>();
         let view = text_rect.height();
         let was_bottom = self.stick;
+        let before = self.scroll.offset;
         self.scroll.wheel(ui, text_rect, f.ui.m.linespace, content, view);
         let bar = Rect::from_min_max(Pos2::new(rect.right() - 12.0, rect.top() + 2.0), Pos2::new(rect.right() - 2.0, rect.bottom() - 2.0));
-        let before = self.scroll.offset;
         self.scroll.bar(ui, Id::unique("log-bar"), bar, content, view, p);
         if was_bottom && self.scroll.offset == before || self.jump_end {
             self.scroll.offset = Scroll::max(content, view);
