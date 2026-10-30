@@ -108,7 +108,7 @@ pub fn looks_like_call(tok: &str) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
     Cq,
-    /// RR73 / 73
+    /// RR73 / RRR / 73
     End,
     Other,
 }
@@ -150,7 +150,7 @@ pub fn parse_message(message: &str) -> Option<Parsed> {
         return None;
     }
     let last = toks.get(2).copied().unwrap_or("");
-    let kind = if last == "RR73" || last == "73" { Kind::End } else { Kind::Other };
+    let kind = if last == "RR73" || last == "RRR" || last == "73" { Kind::End } else { Kind::Other };
     Some(p(kind, toks[1], "", toks[0]))
 }
 

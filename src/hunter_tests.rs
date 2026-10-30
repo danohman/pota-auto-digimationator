@@ -272,6 +272,7 @@ fn messages() {
     let p = parse_message("F5MXH VA3GPL RR73").unwrap();
     assert_eq!((p.kind, p.call.as_str(), p.to.as_str()), (Kind::End, "VA3GPL", "F5MXH"));
     assert_eq!(parse_message("KI6BCJ KG9OH 73").unwrap().kind, Kind::End);
+    assert_eq!(parse_message("K1ABC KI5YNZ RRR").unwrap().kind, Kind::End);
     assert_eq!(parse_message("TI3NEL N9BTC R-21").unwrap().kind, Kind::Other);
     assert!(parse_message("<W1AW/9> <K9ATX> EN53").is_none());
 }
