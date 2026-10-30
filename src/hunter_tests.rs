@@ -886,6 +886,27 @@ fn state_restores_unlogged_qsos_parks_and_skips() {
 }
 
 #[test]
+fn state_restores_second_park_of_same_station() {
+    let mut s = T::new();
+    let now = s.now.get();
+    s.h.seed_worked(vec![WorkedEntry::new("VE3RRH", "20m", "FT8", Some(now), "", "")]);
+    let saved = json!({
+        "date": "2026-10-24",
+        "worked": [
+            {"call": "VE3RRH", "band": "20m", "mode": "FT8", "time": "2026-10-24T18:37:30+00:00",
+             "ref": "CA-5574", "park": "Cave Springs", "logged": true},
+            {"call": "VE3RRH", "band": "20m", "mode": "FT8", "time": "2026-10-24T20:20:33+00:00",
+             "ref": "CA-5573", "park": "Mountainview", "logged": true},
+        ],
+    });
+    s.h.import_state(&saved);
+    assert_eq!(s.h.worked.len(), 2);
+    let again = s.h.export_state();
+    s.h.import_state(&again);
+    assert_eq!(s.h.worked.len(), 2);
+}
+
+#[test]
 fn calls_strongest_eligible() {
     let mut s = T::new();
     s.cycle(&[dec_at("CQ W1PLAIN FN42", 20, 10_515_000),

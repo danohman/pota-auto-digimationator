@@ -811,7 +811,8 @@ impl Hunter {
                 found = same.iter().copied().find(|&i| self.worked[i].dupe_ref().is_empty());
             }
             match found {
-                None if same.is_empty() => self.worked.push(saved),
+                // not in the log yet, or a second park for a station the log already has
+                None if same.is_empty() || !sref.is_empty() => self.worked.push(saved),
                 Some(i) if !sref.is_empty() && self.worked[i].dupe_ref().is_empty() => {
                     let m = &mut self.worked[i];
                     m.ref_ = saved.ref_;
