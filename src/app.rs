@@ -28,7 +28,7 @@ use crate::pota_auth::{self, HuntCounts, StatsPoller};
 use crate::pota_spots::{self, epoch_now, SpotPoller};
 use crate::presence::{Phase, PresenceTimer};
 use crate::settings::{self, Settings};
-use crate::table::{Cell, Chip, Col, Icon, Lead, Row, RowColors, RowData, RowTags, SortKey, Table, TableEvent};
+use crate::table::{Cell, Chip, Col, Icon, Lead, Row, RowColors, ParkKind, RowData, RowTags, SortKey, Table, TableEvent};
 use crate::theme::{self, Fonts, Palette};
 use crate::ui::{self, measure, Rnd, TipAt, Tips};
 use crate::wsjtx_gui;
@@ -149,7 +149,7 @@ impl HunterIo for AppIo {
 }
 
 #[derive(PartialEq, Clone)]
-struct SpotsKey(Option<u64>, Option<&'static str>, String, usize, usize, Option<String>, bool, Option<u64>, i64);
+struct SpotsKey(Option<u64>, Option<&'static str>, String, usize, usize, Option<String>, bool, Option<u64>, i64, bool);
 
 /// The sections that can be popped out into their own windows.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -265,6 +265,14 @@ fn wrap_static(info: Vec<StaticLine>, font: &crate::theme::Font, avail: f32) -> 
         }
     }
     out
+}
+
+/// What a new-parks line holds, which sets its color and whether it pulses.
+#[derive(PartialEq)]
+enum NoticeKind {
+    Plain,
+    New,
+    Atno,
 }
 
 pub struct App {
@@ -1722,6 +1730,7 @@ impl App {
             calling,
             counts.as_ref().map(|c| c.fetched_at.to_bits()),
             (epoch_now() / 60.0) as i64,
+            h.new_parks_only,
         );
         if self.spots_key.as_ref() == Some(&key) {
             return;
@@ -1734,7 +1743,9 @@ impl App {
             let key = (band.clone(), mode.clone());
             if self.notice_seen.get(&key).is_none_or(|old| newest > old) {
                 self.notice_seen.insert(key.clone(), newest.clone());
-                self.notice_pulse.insert(key, until);
+                if self.notice_kind(band, mode) != NoticeKind::Plain {
+                    self.notice_pulse.insert(key, until);
+                }
             }
         }
         self.spots_tree.clear();
@@ -1787,6 +1798,11 @@ impl App {
             let dim = !worked.is_empty();
             let park_col = if dim { 5 } else { 4 };
             let (suffix, lead) = self.hunt_badges(s, counts.as_deref());
+            tags.park = match lead.as_ref().map(|l| l.text.as_str()) {
+                Some("ATNO") => ParkKind::Atno,
+                Some("NEW") => ParkKind::New,
+                _ => ParkKind::Plain,
+            };
             let refs = if s.reference.is_empty() { vec![] } else { vec![s.reference.clone()] };
             let skipped = self.h.is_skipped(&base_call(&s.activator), band, &mode, &refs);
             let mut cells = vec![
@@ -2492,7 +2508,11 @@ impl App {
         let now = self.now();
         let k = pulse(now, GLOW_PERIOD) as f32;
         let kh = pulse(now, HEARD_PERIOD) as f32;
-        RowColors { target: theme::mix(self.p.glow.0, self.p.glow.1, k), heard: theme::mix(self.p.heard.0, self.p.heard.1, kh) }
+        RowColors {
+            target: theme::mix(self.p.glow.0, self.p.glow.1, k), heard: theme::mix(self.p.heard.0, self.p.heard.1, kh),
+            heard_new: theme::mix(self.p.heard_new.0, self.p.heard_new.1, kh),
+            heard_atno: theme::mix(self.p.heard_atno.0, self.p.heard_atno.1, kh),
+        }
     }
 
     fn draw_log_card(&mut self, ui: &mut Ui, rect: Rect) {
@@ -2787,8 +2807,31 @@ impl App {
     }
 
     fn notice_label(&self, n: usize, band: &str, mode: &str, newest: &str) -> String {
-        let newest_text = age_minutes(newest, Utc::now()).map(|a| format!(" (newest {a}m ago)")).unwrap_or_default();
-        format!("{n} new park{} on {band} {mode} right now{newest_text}", if n != 1 { "s" } else { "" })
+        let mut calls: Vec<String> = Vec::new();
+        for (sp, _) in self.h.new_park_spots(band, mode) {
+            if calls.len() == 2 {
+                break;
+            }
+            if !calls.contains(&sp.activator) {
+                calls.push(sp.activator);
+            }
+        }
+        let calls = if calls.is_empty() { String::new() } else { format!(": {}", calls.join(", ")) };
+        let newest_text = age_minutes(newest, Utc::now()).map(|a| format!(" (newest {a}m ago{calls})")).unwrap_or_default();
+        format!("{n}{} park{} on {band} {mode} right now{newest_text}", if self.h.new_parks_only { " new" } else { "" }, if n != 1 { "s" } else { "" })
+    }
+
+    /// What a new-parks line holds: an ATNO park (purple, pulses), a park new to us
+    /// (orange, pulses) or only parks hunted before (plain text, no pulse).
+    fn notice_kind(&self, band: &str, mode: &str) -> NoticeKind {
+        let spots = self.h.new_park_spots(band, mode);
+        if spots.iter().any(|(_, atno)| *atno) {
+            NoticeKind::Atno
+        } else if spots.iter().any(|(s, _)| (self.h.park_is_new)(&s.reference)) {
+            NoticeKind::New
+        } else {
+            NoticeKind::Plain
+        }
     }
 
     fn qsy_button<'a>(f: &'a Fonts, p: &Palette, text: &'a str) -> Rnd<'a> {
@@ -2827,7 +2870,7 @@ impl App {
         let hx = inner.left() + PAD + 2.0;
         let total = self.notices.iter().map(|n| n.2).sum::<usize>().to_string();
         let px = self.pill(ui, hx, hy, hc, &total, "new-count");
-        self.card_title(ui, px + 6.0, hy, hc, "POTA Spots (New to me) [on other band/mode]");
+        self.card_title(ui, px + 6.0, hy, hc, if self.h.new_parks_only { "POTA Spots (new to me, on other bands/modes)" } else { "POTA Spots (all parks, on other bands/modes)" });
         self.pop_button(ui, Card::Notices, inner, hy, hc);
         let (wraps, _) = self.notices_layout(ui, rect.width());
         let rowh = f.ui_bold.m.linespace + 2.0;
@@ -2838,9 +2881,11 @@ impl App {
         for (i, (band, mode, n, newest)) in self.notices.clone().into_iter().enumerate() {
             let ry = top + 1.0;
             let label = self.notice_label(n, &band, &mode, &newest);
+            let kind = self.notice_kind(&band, &mode);
             if self.notice_pulse.get(&(band.clone(), mode.clone())).is_some_and(|u| *u > now) {
                 let h = rowh + 2.0 + if wraps.get(i).copied().unwrap_or(false) { rowh + 2.0 } else { 0.0 };
-                let fill = theme::mix(p.notice.0, p.notice.1, pulse(now, HEARD_PERIOD) as f32);
+                let tint = if kind == NoticeKind::Atno { p.notice_atno } else { p.notice };
+                let fill = theme::mix(tint.0, tint.1, pulse(now, HEARD_PERIOD) as f32);
                 ui.painter().rect_filled(Rect::from_min_size(Pos2::new(inner.left() + 2.0, top), Vec2::new(inner.width() - 4.0, h)), 3.0, fill);
             }
             let b = Self::qsy_button(&f, &p, "QSY");
@@ -2854,7 +2899,11 @@ impl App {
             } else {
                 (lx + sz.x + 8.0, ry)
             };
-            let w = ui::text(ui, ui.painter(), Pos2::new(lab_x + 1.0, lab_y + 1.0), &label, &f.ui, p.new);
+            let w = ui::text(ui, ui.painter(), Pos2::new(lab_x + 1.0, lab_y + 1.0), &label, &f.ui, match kind {
+                NoticeKind::Atno => p.atno,
+                NoticeKind::New => p.new,
+                NoticeKind::Plain => p.text,
+            });
             let label_r = Rect::from_min_size(Pos2::new(lab_x, lab_y), Vec2::new(w + 2.0, rowh));
             let label_resp = ui.interact(label_r, Id::unique(("notice", i)), Sense::hover());
             if label_resp.hovered() {
@@ -2864,7 +2913,8 @@ impl App {
                     .new_park_spots(&band, &mode)
                     .iter()
                     .map(|(s, atno)| {
-                        format!("{} \u{2022} {} ago \u{2022} {} \u{2022} {} ({})", if *atno { "ATNO" } else { "NEW" }, ago(&s.spot_time, now), s.activator, s.reference, s.park_name)
+                        let tag = if *atno { "ATNO \u{2022} " } else if (self.h.park_is_new)(&s.reference) { "NEW \u{2022} " } else { "" };
+                        format!("{}{} ago \u{2022} {} \u{2022} {} ({})", tag, ago(&s.spot_time, now), s.activator, s.reference, s.park_name)
                     })
                     .collect();
                 if !lines.is_empty() {

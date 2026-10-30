@@ -78,12 +78,22 @@ impl Cell {
     }
 }
 
+/// What a spot's park is to us, which sets the color its row pulses when heard.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub enum ParkKind {
+    #[default]
+    Plain,
+    New,
+    Atno,
+}
+
 #[derive(Clone, Default)]
 pub struct RowTags {
     pub worked: bool,
     pub target: bool,
     pub pending: bool,
     pub heard: bool,
+    pub park: ParkKind,
     pub unlogged: bool,
 }
 
@@ -127,6 +137,8 @@ pub struct Row {
 pub struct RowColors {
     pub target: Color32,
     pub heard: Color32,
+    pub heard_new: Color32,
+    pub heard_atno: Color32,
 }
 
 pub enum TableEvent {
@@ -360,7 +372,11 @@ impl Table {
             }
             let t = &row.tags;
             let bg = if t.heard {
-                Some(colors.heard)
+                Some(match t.park {
+                    ParkKind::Plain => colors.heard,
+                    ParkKind::New => colors.heard_new,
+                    ParkKind::Atno => colors.heard_atno,
+                })
             } else if t.worked {
                 Some(p.dim_row)
             } else if t.pending {

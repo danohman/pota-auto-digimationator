@@ -311,6 +311,7 @@ fn new_parks_on_other_bands_and_modes() {
         {"activator": "W4DDD", "frequency": "7200", "mode": "SSB", "reference": "US-8888"},
         {"activator": "W5EEE", "frequency": "10136", "mode": "FT8", "reference": "US-4444"},
     ]), s.t.get()));
+    s.h.new_parks_only = true;
     s.h.park_is_new = Box::new(|r| r != "US-5555");
     let got: Vec<_> = s.h.new_parks_elsewhere().into_iter().map(|r| (r.0, r.1, r.2)).collect();
     assert_eq!(got, [("40m".into(), "FT8".into(), 1), ("30m".into(), "FT8".into(), 1), ("20m".into(), "FT4".into(), 1)]);
@@ -322,6 +323,10 @@ fn new_parks_on_other_bands_and_modes() {
     assert_eq!(bands, ["40m"]);
     s.h.park_is_new = Box::new(|_| false);
     assert!(s.h.new_parks_elsewhere().is_empty());
+    // not hunting new parks only: every unworked, unskipped park counts, hunted or not
+    s.h.new_parks_only = false;
+    let got: Vec<_> = s.h.new_parks_elsewhere().into_iter().map(|r| (r.0, r.2)).collect();
+    assert_eq!(got, [("40m".into(), 2)]);
 }
 
 #[test]
@@ -333,6 +338,7 @@ fn new_parks_report_newest_new_park_spot() {
         {"activator": "W1AAA", "frequency": "7075", "mode": "FT8", "reference": "US-5555",
          "spotTime": "2026-10-25T02:45:00"},
     ]), s.t.get()));
+    s.h.new_parks_only = true;
     s.h.park_is_new = Box::new(|r| r != "US-5555");
     assert_eq!(s.h.new_parks_elsewhere(), [("40m".into(), "FT8".into(), 1, "2026-10-25T02:40:00".into())]);
 }
@@ -1514,5 +1520,12 @@ fn keep_calling_restarts_the_count() {
     s.hs(st_tx(true, true, "N5XYZ"));
     assert_eq!(s.h.target().unwrap().attempts, 2);
     s.h.perform(&ActionKind::KeepCalling { call: "N5XYZ".into() });
+    assert_eq!(s.h.target().unwrap().attempts, 0);
+    // the next call of the new round is 1, not 2
+    s.adv(13.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.adv(4.0);
+    s.hs(st_tx(false, false, "N5XYZ"));
+    s.hs(st_tx(true, true, "N5XYZ"));
     assert_eq!(s.h.target().unwrap().attempts, 1);
 }

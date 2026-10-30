@@ -643,11 +643,11 @@ impl Hunter {
         }
     }
 
-    /// Parks spotted on other bands/modes than the current one that we have never
-    /// hunted (pota.app counts) and haven't worked today, ignoring skipped spots, in
+    /// Parks spotted on other bands/modes than the current one that we haven't worked
+    /// today (only those never hunted, by the pota.app counts, when `new_parks_only`), ignoring skipped spots, in
     /// band order, each with the spot_time of the newest spot at one of those new
-    /// parks: [(band, mode, n_parks, newest_spot_time)]. Digital modes only. Empty
-    /// until the hunt counts have loaded.
+    /// parks: [(band, mode, n_parks, newest_spot_time)]. Digital modes only. With
+    /// `new_parks_only`, empty until the hunt counts have loaded.
     pub fn new_parks_elsewhere(&self) -> Vec<(String, String, usize, String)> {
         let Some(spots) = &self.spots else { return Vec::new() };
         let worked: HashSet<&str> =
@@ -663,7 +663,7 @@ impl Hunter {
                 || !is_digital(&sp.mode)
                 || (Some(band) == here_band && sp.mode == here_mode)
                 || worked.contains(r)
-                || !(self.park_is_new)(r)
+                || (self.new_parks_only && !(self.park_is_new)(r))
                 || self.is_skipped(&base_call(&sp.activator), band, &sp.mode, &[r.to_string()])
             {
                 continue;
@@ -700,7 +700,7 @@ impl Hunter {
                 || sp.band != Some(band)
                 || sp.mode != mode
                 || worked.contains(r)
-                || !(self.park_is_new)(r)
+                || (self.new_parks_only && !(self.park_is_new)(r))
                 || self.is_skipped(&base_call(&sp.activator), band, &sp.mode, &[r.to_string()])
             {
                 continue;
@@ -1025,11 +1025,12 @@ impl Hunter {
         }
     }
 
-    /// The operator clicked Keep calling: start another round of calls (count back to 1).
+    /// The operator clicked Keep calling: start another round of calls. The count goes to 0
+    /// because it counts calls already sent: the next Tx is then logged as 1/max.
     fn keep_calling(&mut self, call: &str) {
         let max = self.max_attempts();
         let Some(t) = self.target_.as_mut().filter(|t| t.call == call && !t.completed) else { return };
-        t.attempts = 1;
+        t.attempts = 0;
         t.idle_since = 0.0;
         let call = t.call.clone();
         self.log(format!("Calling {call} again: another round of up to {max} calls"), Tag::Info);
