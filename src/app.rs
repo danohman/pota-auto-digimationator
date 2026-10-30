@@ -2376,7 +2376,7 @@ impl App {
             // the chip is its own progress bar: the pulsing color fills left to right
             // through the current T/R period over a darker track
             let period = self.cycle_period();
-            let k = cycles::wsjtx_progress(epoch_now(), period) as f32;
+            let k = cycles::cycle_progress(epoch_now(), period) as f32;
             let split = (r.left() + (r.width() * k.clamp(0.0, 1.0)).round()).min(r.right());
             let track = Rnd { fill: theme::mix(tx.fill, Color32::BLACK, 0.5), ..tx.clone() };
             let painter = ui.painter().clone();

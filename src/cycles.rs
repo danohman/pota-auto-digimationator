@@ -93,16 +93,13 @@ impl PeriodDetector {
     }
 }
 
-/// Fill fraction of WSJT-X's own T/R progress bar at time `now` (epoch seconds).
-///
-/// WSJT-X refreshes the bar once per UTC second with value = int(fmod(second, period))
-/// and a maximum of int(period), so it steps each second and, for a period like FT2's
-/// 3.75 s, wraps every 4 s with the last step full. Matching it keeps the two bars in
-/// lockstep (user request).
-pub fn wsjtx_progress(now: f64, period: f64) -> f64 {
-    let top = (period as i64).max(1) as f64;
-    let value = ((now.trunc()) % period).trunc();
-    (value / top).min(1.0)
+/// How far through the current T/R period `now` (epoch seconds) is, 0 to 1, continuously
+/// (user request 2026-10-30: smooth instead of stepping each second like WSJT-X's bar).
+pub fn cycle_progress(now: f64, period: f64) -> f64 {
+    if period <= 0.0 {
+        return 0.0;
+    }
+    (now % period) / period
 }
 
 #[cfg(test)]
@@ -150,12 +147,11 @@ mod tests {
     }
 
     #[test]
-    fn progress_steps_like_wsjtxs_bar() {
-        let steps: Vec<f64> = (0..8)
-            .map(|s| (wsjtx_progress(s as f64 + 0.6, 3.75) * 100.0).round() / 100.0)
-            .collect();
-        assert_eq!(steps, [0.0, 0.33, 0.67, 1.0, 0.0, 0.33, 0.67, 1.0]);
-        assert_eq!(wsjtx_progress(60.0 * 5.0 + 14.9, 15.0), 14.0 / 15.0);
-        assert_eq!(wsjtx_progress(60.0 * 5.0 + 15.0, 15.0), 0.0);
+    fn progress_is_continuous() {
+        assert_eq!(cycle_progress(300.0, 15.0), 0.0);
+        assert!((cycle_progress(300.0 + 7.5, 15.0) - 0.5).abs() < 1e-9);
+        assert!((cycle_progress(300.0 + 14.99, 15.0) - 14.99 / 15.0).abs() < 1e-9);
+        assert_eq!(cycle_progress(300.0 + 15.0, 15.0), 0.0);
+        assert!((cycle_progress(3.75 * 3.0 + 1.875, 3.75) - 0.5).abs() < 1e-9);
     }
 }
