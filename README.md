@@ -24,6 +24,7 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 - [pota.app: spots and hunt counts](#potaapp-spots-and-hunt-counts)
 - [Radio (CAT) settings](#radio-cat-settings)
 - [Making it yours](#making-it-yours)
+- [Troubleshooting](#troubleshooting)
 - [Safety](#safety)
 - [Files](#files)
 - [Building](#building)
@@ -182,10 +183,16 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 
 - **Theme**: Match Windows (default), Light or Dark, under **Settings > Appearance** or with the sun/moon button.
 - **Font size**: **Settings > Appearance > Text size**, with − and + buttons. It changes the whole window at once.
+- **Graphics backend**: **Settings > Appearance > Graphics** chooses how the window is drawn: Automatic (the default), DirectX 12, Vulkan or OpenGL. Automatic picks a real graphics chip over a software renderer and tries OpenGL last. A change asks to restart the program and applies on the next start.
 - **Pop-out**: the button at the right end of each section's header moves that section into its own window. Drag it to another monitor if you like. Click the button again (or close the window) to put it back.
 - **Rearrange**: drag a section's header to move it above or below another section, in either column. Drag the dividers to resize.
 - **Updates**: the app checks GitHub for a newer release a few seconds after start and every few hours. When there is one, a blue "Version X is available, click to update now" button appears in Current Info. Clicking it downloads the new exe, checks it, installs it and restarts the app (it won't while a QSO or Auto mode is active). Turn the check off, or run it now, under **Settings > About**.
 - Window position and size, section order, sizes and pop-out windows are all remembered.
+
+## Troubleshooting
+
+- **High memory or CPU use on Windows 10 with Intel HD Graphics.** Some Intel HD Graphics drivers on Windows 10 are known to leak memory when a program draws through OpenGL, and to use all of the CPU when Windows falls back to its software renderer. If the program's memory keeps growing, or it uses far more CPU than it should, open **Settings > Appearance > Graphics**, pick **DirectX 12**, **Vulkan** or **OpenGL**, restart, and see which one stays steady. Updating the graphics driver from Intel or your PC maker may also help.
+- **A better fix is to move off Windows 10.** Windows 10 reached the end of its support on October 14, 2025: it no longer gets security updates, so running it on a computer that is on the internet is a risk, and that has nothing to do with this program. If the PC can run Windows 11, upgrade it. If it can't, consider a newer computer, or a Linux distribution for the old one.
 
 ## Safety
 
