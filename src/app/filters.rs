@@ -78,7 +78,7 @@ impl App {
                 progs.push((h.clone(), 0));
             }
         }
-        progs.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        progs.sort_by(|a, b| a.0.cmp(&b.0));
         progs.into_iter().map(|(p, n)| { let shown = !hidden.contains(&p); (p, n, shown) }).collect()
     }
 

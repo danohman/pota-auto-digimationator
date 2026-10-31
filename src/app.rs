@@ -45,9 +45,9 @@ pub const HEARD_SECONDS: f64 = 3.0;
 pub const HEARD_PERIOD: f64 = 0.6;
 pub const GLOW_PERIOD: f64 = 1.6;
 pub const ATTEMPT_MODES: [&str; 3] = ["FT8", "FT4", "FT2"];
-/// "Are you still there?" every this long (10 minutes)
+/// "Are you still there?" is asked after this long without activity (10 minutes)
 pub const PRESENCE_SECONDS: f64 = 600.0;
-/// the question is asked this long before the deadline
+/// the time to answer; the Auto modes switch off when it runs out
 pub const PRESENCE_WARN: f64 = 60.0;
 /// older spots get a faint red Ago cell
 pub const STALE_MINUTES: i64 = 10;
@@ -594,7 +594,7 @@ impl App {
             decode_until: 0.0,
             radio: None,
             periods: PeriodDetector::default(),
-            presence: PresenceTimer::new(PRESENCE_SECONDS, PRESENCE_WARN, Box::new(mono_clock(t0))),
+            presence: PresenceTimer::new(PRESENCE_SECONDS + PRESENCE_WARN, PRESENCE_WARN, Box::new(mono_clock(t0))),
             presence_off: false,
             typed: vec![],
             state_ready: false,
@@ -3074,6 +3074,8 @@ impl App {
                 fits
             }
         });
+        // the busiest programs make the cut when the list is too long; the menu is by prefix
+        progs.sort_by(|a, b| a.0.cmp(&b.0));
         let mut items = vec![Item::Heading(format!("Show/hide spots for these programs on {band} {mode} (checked = shown)"))];
         items.push(Item::Row {
             label: "Manage all filters...".into(),

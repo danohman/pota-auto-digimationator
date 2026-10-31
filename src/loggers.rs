@@ -150,7 +150,14 @@ pub fn payload(kind: Kind, fields: &[(&str, String)], port: u16) -> (Vec<u8>, u1
     let adif = adif_line(fields);
     match kind {
         Kind::N1mm => (adif.into_bytes(), port),
-        Kind::Logger32 => (adif.into_bytes(), port), // TCP, like JTDX's "send to TCP server"
+        Kind::Logger32 => {
+            // TCP, like JTDX's "send to TCP server"; Logger32 also gets the park in POTA_REF
+            let mut f = fields.to_vec();
+            if let Some(r) = fields.iter().find(|(k, _)| *k == "SIG_INFO").map(|(_, v)| v.clone()) {
+                f.push(("POTA_REF", r));
+            }
+            (adif_line(&f).into_bytes(), port)
+        }
         Kind::Log4om => (format!("ADD {adif}").into_bytes(), port),
         Kind::Dxkeeper => {
             let cmd = format!("<command:3>log <parameters:{}>{adif}\r\n", adif.len());
@@ -236,10 +243,18 @@ mod tests {
     }
 
     #[test]
-    fn logger32_is_bare_adif_over_tcp() {
+    fn logger32_is_adif_over_tcp_with_pota_ref() {
         let (q, e) = sample();
         let f = adif_fields(&q, &e);
-        assert_eq!(payload(Kind::Logger32, &f, 52001), (adif_line(&f).into_bytes(), 52001));
+        let (bytes, port) = payload(Kind::Logger32, &f, 52001);
+        let a = String::from_utf8(bytes).unwrap();
+        assert_eq!(port, 52001);
+        assert!(a.starts_with(&adif_line(&f)[..adif_line(&f).len() - 5]));
+        assert!(a.contains("<POTA_REF:7>US-1234 <EOR>"));
+        // no park, no tag
+        let (q, mut e) = sample();
+        e.ref_.clear();
+        assert!(!String::from_utf8(payload(Kind::Logger32, &adif_fields(&q, &e), 52001).0).unwrap().contains("POTA_REF"));
     }
 
     #[test]
