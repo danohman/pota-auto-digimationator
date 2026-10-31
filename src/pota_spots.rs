@@ -14,7 +14,7 @@ use crate::events::{Event, Post};
 use crate::hunter::{band_for, base_call};
 
 pub const SPOTS_URL: &str = "https://api.pota.app/v1/spots";
-pub const USER_AGENT: &str = "pota-auto-digimationator/1.0";
+pub const USER_AGENT: &str = concat!("pota-auto-digimationator/", env!("CARGO_PKG_VERSION"));
 /// seconds between fetches, never less
 pub const POLL_INTERVAL: f64 = 60.0;
 /// reuse the cache file on startup if newer than this
