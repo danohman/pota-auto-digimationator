@@ -62,6 +62,8 @@ pub struct Settings {
     pub pop: bool,
     /// custom file for it; "" = the built-in pop
     pub pop_path: String,
+    /// graphics backend: "" = wgpu's choice, "dx12", "vulkan" or "gl" (`POTA_GPU` overrides)
+    pub gpu: String,
     /// keep ATT/NB/NR off on the Yaesu, over the COM port (cat.rs)
     pub rig_clean: bool,
     /// put NB, NR, ATT and power back as they were before QSY and on close
@@ -143,6 +145,7 @@ impl Default for Settings {
             ding_path: String::new(),
             pop: true,
             pop_path: String::new(),
+            gpu: String::new(),
             rig_clean: true,
             rig_restore: true,
             rig_power: None,

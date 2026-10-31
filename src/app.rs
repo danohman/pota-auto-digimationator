@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
 
+mod debug;
 mod filters;
 
 use crate::aclog::AclogClient;
@@ -368,6 +369,10 @@ pub struct App {
     dialog: Option<Dialog>,
     /// the Program filters window, when open
     filters: Option<filters::Filters>,
+    /// the debug window (click the header icon), when open
+    debug: Option<debug::DebugWin>,
+    /// graphics adapter facts for the debug window, read at start-up
+    gfx: Vec<(String, String)>,
     tips: Tips,
     panes: Panes,
     next_tick: f64,
@@ -460,8 +465,15 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), k: f64) -> Color32 {
     Color32::from_rgb(f(a.0, b.0), f(a.1, b.1), f(a.2, b.2))
 }
 
+/// 0..1 and back over `period`, in `PULSE_STEPS` steps: a pulsing row or button is a new
+/// background color every frame, and `ui::text_on` makes a GDI texture per (text, bg), so
+/// a continuous pulse uploaded and freed textures at 25 fps (memory ballooned to GBs with
+/// some Windows 10 OpenGL drivers). Stepped, the same few textures are reused.
+const PULSE_STEPS: f64 = 16.0;
+
 fn pulse(now: f64, period: f64) -> f64 {
-    (1.0 - (2.0 * std::f64::consts::PI * (now % period) / period).cos()) / 2.0
+    let k = (1.0 - (2.0 * std::f64::consts::PI * (now % period) / period).cos()) / 2.0;
+    (k * PULSE_STEPS).round() / PULSE_STEPS
 }
 
 impl App {
@@ -475,6 +487,7 @@ impl App {
             let _ = tx.send(e);
             repaint.request_repaint();
         });
+        let gfx = cc.wgpu_render_state.as_ref().map(|rs| debug::graphics_rows(rs, &s.gpu)).unwrap_or_default();
         // First run: no settings.json yet. The setup wizard runs before anything is started
         // (no listener, no pota.app polling); `begin_operation` starts them afterwards.
         let first_run = !dir.join("data").join("settings.json").exists();
@@ -618,6 +631,8 @@ impl App {
             in_pop: None,
             dialog: None,
             filters: None,
+            debug: None,
+            gfx,
             tips: Tips::default(),
             panes: Panes::new(),
             next_tick: 0.0,
@@ -774,6 +789,11 @@ impl App {
         self.dialog.is_some()
     }
 
+    /// The graphics backend setting changed: offer to restart so it takes effect.
+    pub fn ask_restart(&mut self) {
+        self.dialog = Some(Dialog::new(DialogKind::RestartGpu));
+    }
+
     /// The open dialog, if any, as a modal over the main window (or the wizard).
     fn draw_dialog(&mut self, ctx: &egui::Context, screen: Rect) {
         if let Some(mut d) = self.dialog.take() {
@@ -797,6 +817,10 @@ impl App {
                     DialogKind::ConfirmHunt => self.set_hunting(true),
                     DialogKind::ConfirmCq => self.set_cq(true),
                     DialogKind::UpdateAvail(_) => self.start_update(),
+                    DialogKind::RestartGpu => {
+                        crate::update::request_restart();
+                        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
                     _ => {}
                 },
                 dialogs::Outcome::StillHere => {
@@ -2175,6 +2199,10 @@ impl App {
         });
         let logo_rect = Rect::from_min_size(Pos2::new(lx, ly), Vec2::splat(36.0));
         painter.image(logo.id(), logo_rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        // a hidden button: the icon opens the debug window
+        if ui.interact(logo_rect, Id::unique("logo-debug"), Sense::click()).clicked() {
+            self.debug = Some(debug::DebugWin::new());
+        }
         let tx = lx + 36.0 + 12.0;
         // right side: gear, theme, Auto-Hunt, Auto CQ/Answer (right to left)
         let icon_font = if f.has_icons { &f.icon } else { &f.ui_bold };
@@ -3025,7 +3053,7 @@ impl App {
         let elsewhere = self.s.hidden_programs.len() - n;
         let text = if n == 0 { "Program Filter ▾".to_string() } else { format!("Program Filter: {n} hidden ▾") };
         // red while a filter is on (see filter_red)
-        let (mut fill, mut fg) = if n == 0 { (p.neutral, p.neutral_text) } else { (self.filter_red(false), p.neutral_text) };
+        let (mut fill, mut fg) = if n == 0 { (p.surface, p.text) } else { (self.filter_red(false), p.neutral_text) };
         if let Some((until, kind)) = self.hidden_heard {
             if until > now {
                 let c = self.row_colors();
@@ -3934,6 +3962,7 @@ impl eframe::App for App {
         self.wizard_frame(&ctx, ui); // (a re-run from Settings covers the window)
         self.draw_dialog(&ctx, screen);
         self.draw_filters(&ctx, screen);
+        self.draw_debug(&ctx);
         if self.demo_tip {
             let at = Rect::from_min_size(Pos2::new(200.0, 200.0), Vec2::new(300.0, 20.0));
             self.tips.tip_area(Id::unique("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));

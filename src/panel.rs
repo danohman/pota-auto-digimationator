@@ -129,6 +129,7 @@ enum Do {
     Changed,
     Theme(&'static str),
     FontSize(u32),
+    GpuChanged,
     Test(Kind),
     Choose(Kind),
     ResetSound(Kind),
@@ -713,6 +714,14 @@ impl Panel {
                         let idx = sizes.iter().position(|n| *n == app.s.font_size).unwrap_or(2);
                         if let Some(i) = l.stepper_row("Font size", "Changes everywhere at once; 10 pt is the default", &labels, idx) {
                             l.act.push(Do::FontSize(sizes[i]));
+                        }
+                        l.section("Graphics");
+                        let gpus = ["", "dx12", "vulkan", "gl"];
+                        let labels: Vec<String> = ["Automatic", "DirectX 12", "Vulkan", "OpenGL"].iter().map(|s| s.to_string()).collect();
+                        let idx = gpus.iter().position(|g| *g == app.s.gpu).unwrap_or(0);
+                        if let Some(i) = l.stepper_row("Graphics backend", "Takes effect when the program is restarted; try another if memory use keeps growing", &labels, idx) {
+                            app.s.gpu = gpus[i].to_string();
+                            l.act.push(Do::GpuChanged);
                         }
                         l.section("Setup");
                         let btn = l.small_button("Run setup wizard");
@@ -1488,6 +1497,10 @@ impl Panel {
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
                 Do::FontSize(pt) => app.set_font_size(ctx, pt),
+                Do::GpuChanged => {
+                    app.settings_changed();
+                    app.ask_restart();
+                }
                 Do::Test(k) => {
                     let path = if matches!(k, Kind::Ding) { &app.s.ding_path } else { &app.s.pop_path };
                     crate::sound::play(k, path);

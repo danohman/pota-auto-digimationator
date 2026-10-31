@@ -90,6 +90,11 @@ fn gdi_advances(dc: isize, w: &[u16]) -> Option<Vec<f32>> {
     }).collect())
 }
 
+/// (text runs, measured strings) cached, for the debug window.
+pub fn cache_sizes() -> (usize, usize) {
+    (RUNS.with(|m| m.borrow().len()), POSITIONS.with(|m| m.borrow().0))
+}
+
 /// Where each character of `text` starts, as Tk lays it out (GDI advance widths; a
 /// character the font lacks is measured in Segoe UI Symbol, like Tk's fallback), and
 /// the total width last.

@@ -176,6 +176,14 @@ pub fn request_relaunch() {
     RELAUNCH_NOW.store(true, Ordering::SeqCst);
 }
 
+/// Restart the same exe once the app has closed (a setting that only applies at start-up changed).
+pub fn request_restart() {
+    if let Ok(exe) = std::env::current_exe() {
+        *RELAUNCH.lock().unwrap() = Some(exe);
+        RELAUNCH_NOW.store(true, Ordering::SeqCst);
+    }
+}
+
 /// Called by main after the window has closed and the app has shut down (rig restored,
 /// settings saved): start the new exe, so two copies never run together.
 pub fn relaunch_if_requested() {

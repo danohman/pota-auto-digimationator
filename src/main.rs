@@ -23,6 +23,7 @@ mod programs;
 mod respot;
 mod settings;
 mod sound;
+mod sysinfo;
 mod table;
 mod textsel;
 mod theme;
@@ -135,7 +136,21 @@ fn main() -> eframe::Result {
     if let Some((w, h, x, y)) = s.window.as_deref().and_then(saved_geometry).filter(|_| !first_run) {
         vp = vp.with_inner_size([(w as f32 / scale).max(min_width), (h as f32 / scale).max(480.0)]).with_position([x as f32 / scale, y as f32 / scale]);
     }
-    let options = eframe::NativeOptions { viewport: vp, centered: s.window.is_none() || first_run, ..Default::default() };
+    let mut options = eframe::NativeOptions { viewport: vp, centered: s.window.is_none() || first_run, ..Default::default() };
+    // some Windows 10 graphics stacks leak memory on every frame: let the backend be chosen
+    let gpu = std::env::var("POTA_GPU").unwrap_or_else(|_| s.gpu.clone());
+    let backends = match gpu.trim().to_ascii_lowercase().as_str() {
+        "dx12" => Some(eframe::wgpu::Backends::DX12),
+        "vulkan" => Some(eframe::wgpu::Backends::VULKAN),
+        "gl" => Some(eframe::wgpu::Backends::GL),
+        _ => None,
+    };
+    if let eframe::egui_wgpu::WgpuSetup::CreateNew(c) = &mut options.wgpu_options.wgpu_setup {
+        if let Some(b) = backends {
+            c.instance_descriptor.backends = b;
+        }
+        c.native_adapter_selector = Some(std::sync::Arc::new(pick_adapter));
+    }
     let channel = std::sync::mpsc::channel();
     let result = eframe::run_native(
         TITLE,
@@ -144,4 +159,34 @@ fn main() -> eframe::Result {
     );
     update::relaunch_if_requested(); // after an update: the app has shut down, start the new exe
     result
+}
+
+/// Which graphics adapter to draw with when the user hasn't forced a backend. wgpu's own
+/// pick can land on OpenGL, which leaks memory on Intel integrated graphics under
+/// Windows 10 (2026-10-31), so OpenGL is the last resort: faster kinds of GPU first, then
+/// DirectX 12 on Intel (its Vulkan drivers are the shakiest) or Vulkan elsewhere.
+fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgpu::Surface<'_>>) -> Result<eframe::wgpu::Adapter, String> {
+    use eframe::wgpu::{Backend, DeviceType};
+    adapters
+        .iter()
+        .min_by_key(|a| {
+            let i = a.get_info();
+            let usable = surface.is_none_or(|s| a.is_surface_supported(s));
+            let kind = match i.device_type {
+                DeviceType::DiscreteGpu => 0,
+                DeviceType::IntegratedGpu => 1,
+                DeviceType::VirtualGpu => 2,
+                DeviceType::Other => 3,
+                DeviceType::Cpu => 4,
+            };
+            let intel = i.vendor == 0x8086;
+            let backend = match (i.backend, intel) {
+                (Backend::Gl, _) => 2,
+                (Backend::Dx12, true) | (Backend::Vulkan, false) => 0,
+                _ => 1,
+            };
+            (!usable, backend == 2, kind, backend)
+        })
+        .cloned()
+        .ok_or_else(|| "no graphics adapter found".to_string())
 }

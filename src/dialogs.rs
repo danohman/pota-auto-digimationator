@@ -24,6 +24,8 @@ pub enum DialogKind {
     UpdateAvail(String),
     /// the update check failed (the reason)
     CheckFailed(String),
+    /// the graphics backend changed; offers Restart now / Later
+    RestartGpu,
 }
 
 impl DialogKind {
@@ -117,6 +119,9 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             para(&format!("You are running version {}.", env!("CARGO_PKG_VERSION")), &f.ui, p.text, 8.0),
             para("Update now downloads the new version, swaps it in and restarts the app. The app closes normally first. It won't update while a QSO or an Auto mode is active.", &f.ui, p.text, 8.0),
         ]),
+        DialogKind::RestartGpu => ("Restart needed".into(), "Restart to change the graphics backend".into(), p.blue, vec![
+            para("The new graphics backend is used the next time the program starts. Restart now closes the app normally (the radio is put back as it was) and opens it again.", &f.ui, p.text, 8.0),
+        ]),
         DialogKind::CheckFailed(e) => ("Update check failed".into(), "Couldn't check for updates".into(), p.bad, vec![
             para(e, &f.ui, p.text, 8.0),
         ]),
@@ -150,6 +155,11 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
         DialogKind::UpdateAvail(_) => (
             Some(Rnd::new("Update now", ui_bold).pill().pad(18.0, 7.0).colors(p.blue, p.blue_text).hover(p.blue_hover)),
             Some(Rnd::new("Cancel", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
+            0.0,
+        ),
+        DialogKind::RestartGpu => (
+            Some(Rnd::new("Restart now", ui_bold).pill().pad(18.0, 7.0).colors(p.blue, p.blue_text).hover(p.blue_hover)),
+            Some(Rnd::new("Later", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
             0.0,
         ),
         DialogKind::PresenceAsk => (
@@ -217,7 +227,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
         }
         let right = full.right() - 24.0;
         match kind {
-            DialogKind::ConfirmHunt | DialogKind::ConfirmCq | DialogKind::UpdateAvail(_) => {
+            DialogKind::ConfirmHunt | DialogKind::ConfirmCq | DialogKind::UpdateAvail(_) | DialogKind::RestartGpu => {
                 y += 20.0;
                 let (e, c) = (b1.as_ref().unwrap(), b2.as_ref().unwrap());
                 let es = e.size(ui);
