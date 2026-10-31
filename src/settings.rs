@@ -95,6 +95,9 @@ pub struct Settings {
     pub pounce_signoffs: bool,
     /// only auto-hunt parks pota.app says you never hunted (NEW)
     pub new_parks_only: bool,
+    /// "JA 20m FT8" keys: programs hidden on that band and mode (lists, counts, hunting)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub hidden_programs: Vec<String>,
     /// pota.app account, for the hunt-count chips
     pub pota_user: String,
     pub pota_password: String,
@@ -158,6 +161,7 @@ impl Default for Settings {
             adif_path: String::new(),
             pounce_signoffs: true,
             new_parks_only: false,
+            hidden_programs: Vec::new(),
             pota_user: String::new(),
             pota_password: String::new(),
             respot: true,

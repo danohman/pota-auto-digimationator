@@ -2,7 +2,7 @@
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
 //! pota.app spot poller. Fetches at most once a minute and keeps a local copy.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -52,12 +52,31 @@ pub struct Spot {
     pub spot_time: String,
 }
 
+impl Spot {
+    /// The program of the park: "US" for "US-1234", "JA" for "JA-116273"; "" without a park.
+    pub fn program(&self) -> &str {
+        program_of(&self.reference)
+    }
+}
+
+pub fn program_of(reference: &str) -> &str {
+    reference.split_once('-').map_or("", |(p, _)| p)
+}
+
+/// How a hidden program is stored for one band and mode: "JA 20m FT8".
+pub fn hide_key(program: &str, band: &str, mode: &str) -> String {
+    format!("{program} {band} {}", mode.to_uppercase())
+}
+
 /// Local copy of the spot list, indexed by base callsign (in the order pota.app
-/// listed them).
+/// listed them). Spots of a program hidden on their band and mode (see `set_hidden`) are
+/// kept but never returned, so every list, count and the hunt see the same filtered table.
+#[derive(Clone)]
 pub struct SpotTable {
     pub fetched_at: f64,
     calls: Vec<(String, Vec<Spot>)>,
     index: HashMap<String, usize>,
+    hidden: HashSet<String>,
 }
 
 fn text(s: &Value, key: &str) -> String {
@@ -79,9 +98,16 @@ fn truthy(v: Option<&Value>) -> bool {
     }
 }
 
+/// The activator's or a hunter's last comment says "QRT": the station is off the air.
+fn went_qrt(s: &Value) -> bool {
+    ["activatorLastComments", "hunterLastComments"]
+        .iter()
+        .any(|k| text(s, k).to_uppercase().contains("QRT"))
+}
+
 impl SpotTable {
     pub fn new(raw: &[Value], fetched_at: f64) -> Self {
-        let mut t = SpotTable { fetched_at, calls: Vec::new(), index: HashMap::new() };
+        let mut t = SpotTable { fetched_at, calls: Vec::new(), index: HashMap::new(), hidden: HashSet::new() };
         for s in raw {
             let khz = match s.get("frequency") {
                 None | Some(Value::Null) => 0.0,
@@ -95,7 +121,7 @@ impl SpotTable {
                 Some(_) => continue,
             };
             let call = text(s, "activator").to_uppercase();
-            if call.is_empty() || truthy(s.get("invalid")) {
+            if call.is_empty() || truthy(s.get("invalid")) || went_qrt(s) {
                 continue;
             }
             let spot = Spot {
@@ -125,12 +151,57 @@ impl SpotTable {
         t
     }
 
-    pub fn len(&self) -> usize {
-        self.calls.iter().map(|(_, v)| v.len()).sum()
+    /// Hide the spots of these program/band/mode combinations (`hide_key`): "JA" can be
+    /// hidden on 20m FT8 and still shown on 40m FT8.
+    pub fn set_hidden(&mut self, hidden: HashSet<String>) {
+        self.hidden = hidden;
     }
 
-    pub fn all(&self) -> impl Iterator<Item = &Spot> {
-        self.calls.iter().flat_map(|(_, v)| v.iter())
+    fn shown(&self, s: &Spot) -> bool {
+        match s.band {
+            Some(b) if !self.hidden.is_empty() => !self.hidden.contains(&hide_key(s.program(), b, &s.mode)),
+            _ => true,
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.all().count()
+    }
+
+    pub fn all(&self) -> impl Iterator<Item = &Spot> + '_ {
+        self.calls.iter().flat_map(|(_, v)| v.iter()).filter(|s| self.shown(s))
+    }
+
+    /// Every program spotted on `band` in `mode`, hidden ones included, as (program,
+    /// spots), the busiest first: what the program filter offers.
+    pub fn programs(&self, band: &str, mode: &str) -> Vec<(String, usize)> {
+        let mode = mode.to_uppercase();
+        let mut n: HashMap<&str, usize> = HashMap::new();
+        for s in self.calls.iter().flat_map(|(_, v)| v.iter()).filter(|s| s.band == Some(band) && s.mode == mode && !s.program().is_empty()) {
+            *n.entry(s.program()).or_default() += 1;
+        }
+        let mut v: Vec<(String, usize)> = n.into_iter().map(|(p, c)| (p.to_string(), c)).collect();
+        v.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        v
+    }
+
+    /// Every band and mode with digital spots, hidden ones counted too, as (band, mode,
+    /// spots): what the Program filters window lists.
+    pub fn combos(&self) -> Vec<(&'static str, String, usize)> {
+        let mut n: HashMap<(&'static str, &str), usize> = HashMap::new();
+        for s in self.calls.iter().flat_map(|(_, v)| v.iter()).filter(|s| is_digital(&s.mode)) {
+            if let Some(b) = s.band {
+                *n.entry((b, s.mode.as_str())).or_default() += 1;
+            }
+        }
+        n.into_iter().map(|((b, m), c)| (b, m.to_string(), c)).collect()
+    }
+
+    /// The spots of `call` on `band` in `mode` that the program filter hides (so the Programs
+    /// button can say a filtered station was heard).
+    pub fn hidden_spots_for_mode(&self, call: &str, band: &str, mode: &str) -> Vec<&Spot> {
+        let Some(&i) = self.index.get(&base_call(call)) else { return Vec::new() };
+        self.calls[i].1.iter().filter(|s| s.band == Some(band) && s.mode.eq_ignore_ascii_case(mode) && !self.shown(s)).collect()
     }
 
     /// Spots in a mode WSJT-X can handle (SSB, CW and FM spots are left out).
@@ -143,7 +214,7 @@ impl SpotTable {
         self.calls[i]
             .1
             .iter()
-            .filter(|s| band.is_none() || s.band == band)
+            .filter(|s| (band.is_none() || s.band == band) && self.shown(s))
             .collect()
     }
 
@@ -286,5 +357,44 @@ mod tests {
         assert_eq!(t.count("20m", "FT8"), 1);
         assert_eq!(t.len(), 5);
         assert_eq!(t.digital_count(), 4);
+    }
+
+    #[test]
+    fn qrt_spots_are_skipped() {
+        let raw = vec![
+            json!({"activator": "K1A", "frequency": "7074", "mode": "FT8", "activatorLastComments": "Qrt tnx"}),
+            json!({"activator": "K2B", "frequency": "7075", "mode": "FT8", "hunterLastComments": "he went QRT"}),
+            json!({"activator": "K3C", "frequency": "7076", "mode": "FT8", "activatorLastComments": "CQ POTA"}),
+        ];
+        let t = SpotTable::new(&raw, 0.0);
+        assert_eq!(t.len(), 1);
+        assert!(t.spots_for("K1A", None).is_empty());
+        assert_eq!(t.spots_for("K3C", None).len(), 1);
+    }
+
+    #[test]
+    fn hidden_programs_vanish_only_on_their_band_and_mode() {
+        let raw = vec![
+            json!({"activator": "K1A", "frequency": "7074", "mode": "FT8", "reference": "US-1234"}),
+            json!({"activator": "JA1B", "frequency": "7075", "mode": "FT8", "reference": "JA-116273"}),
+            json!({"activator": "JA2C", "frequency": "14074", "mode": "FT8", "reference": "JA-0001"}),
+            json!({"activator": "K4D", "frequency": "14075", "mode": "FT4", "reference": "US-1"}),
+            json!({"activator": "K5E", "frequency": "7030", "mode": "CW", "reference": "CA-9"}),
+        ];
+        let mut t = SpotTable::new(&raw, 0.0);
+        assert_eq!(t.programs("40m", "FT8"), vec![("JA".to_string(), 1), ("US".to_string(), 1)]);
+        t.set_hidden([hide_key("JA", "20m", "ft8")].into_iter().collect());
+        assert_eq!(t.len(), 4);
+        assert_eq!(t.count("20m", "FT8"), 0); // JA2C is hidden on 20m FT8
+        assert_eq!(t.count("40m", "FT8"), 2); // JA1B still shows on 40m FT8
+        assert!(!t.spots_for("JA1B", None).is_empty());
+        assert!(t.spots_for("JA2C", None).is_empty());
+        assert_eq!(t.hidden_spots_for_mode("JA2C", "20m", "FT8").len(), 1);
+        assert!(t.hidden_spots_for_mode("JA1B", "40m", "FT8").is_empty());
+        assert_eq!(t.programs("20m", "FT8"), vec![("JA".to_string(), 1)]); // still offered, so it can be shown again
+        t.set_hidden(Default::default());
+        assert_eq!(t.len(), 5);
+        assert_eq!(program_of("US-1234"), "US");
+        assert_eq!(program_of(""), "");
     }
 }

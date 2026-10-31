@@ -443,6 +443,8 @@ pub struct Hunter {
     pub auto_log: bool,
     /// auto-hunt only parks pota.app says we never hunted (NEW)
     pub new_parks_only: bool,
+    /// "JA 20m FT8" keys (pota_spots::hide_key): programs hidden on that band and mode, hunting included
+    pub hidden_programs: HashSet<String>,
     /// also call a station that has just sent 73/RR73 to someone
     pub pounce_signoffs: bool,
 
@@ -539,6 +541,7 @@ impl Hunter {
             min_snr: Some(-20),
             auto_log: true,
             new_parks_only: false,
+            hidden_programs: HashSet::new(),
             pounce_signoffs: true,
             awaiting_log: None,
             status: None,
@@ -862,7 +865,10 @@ impl Hunter {
 
     /// New local spot copy; also fills in parks for worked entries that lack one
     /// (shown in the list only; a guessed park doesn't count for dupes).
-    pub fn set_spots(&mut self, table: Arc<SpotTable>) {
+    pub fn set_spots(&mut self, mut table: Arc<SpotTable>) {
+        if !self.hidden_programs.is_empty() {
+            Arc::make_mut(&mut table).set_hidden(self.hidden_programs.clone());
+        }
         let mut changed = false;
         for e in self.worked.iter_mut() {
             if e.ref_.is_empty() {
@@ -881,6 +887,15 @@ impl Hunter {
         self.spots = Some(table);
         if changed {
             self.worked_did_change();
+        }
+    }
+
+    /// Hide the spots of these program/band/mode keys (a QSO already under way
+    /// carries on).
+    pub fn set_hidden_programs(&mut self, hidden: HashSet<String>) {
+        self.hidden_programs = hidden.clone();
+        if let Some(t) = &mut self.spots {
+            Arc::make_mut(t).set_hidden(hidden);
         }
     }
 
@@ -1359,6 +1374,14 @@ impl Hunter {
             Some(s) => s.spots_for_mode(&call, band, &self.mode()).iter().map(|s| (s.reference.clone(), s.park_name.clone())).collect(),
             None => Vec::new(),
         };
+        // A station whose only spots are hidden by the program filter is spotted, just not
+        // wanted: never a candidate (not even as "[not spotted]" when it sends CQ POTA).
+        if spots.is_empty() {
+            let hidden = self.spots.as_ref().is_some_and(|s| !s.hidden_spots_for_mode(&call, band, &self.mode()).is_empty());
+            if hidden {
+                return;
+            }
+        }
         if let Some(first) = spots.first() {
             self.known_ref.insert(call.clone(), first.clone());
         }

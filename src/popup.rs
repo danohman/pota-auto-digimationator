@@ -13,6 +13,13 @@ pub enum MenuCmd {
     Unskip { call: String, ref_: String },
     Band(String),
     Mode(String),
+    /// hide or show a program from the Programs menu, which stays open
+    ToggleProgram(String),
+    /// hide a program from a spot's right-click menu
+    HideProgram(String),
+    ShowAllPrograms,
+    /// open the Program filters window
+    ManageFilters,
 }
 
 #[derive(Clone)]
@@ -20,6 +27,8 @@ pub enum Item {
     /// a small muted heading
     Heading(String),
     Row { label: String, cmd: Option<MenuCmd>, subtitle: String },
+    /// a row with a checkbox before the label (the Program Filter list)
+    Check { label: String, checked: bool, cmd: MenuCmd },
 }
 
 pub struct PopupMenu {
@@ -41,8 +50,13 @@ impl PopupMenu {
             Item::Row { subtitle, .. } if !subtitle.is_empty() => {
                 7.0 + f.ui.m.linespace + 2.0 * BD + f.small.m.linespace + 2.0 * BD + 7.0
             }
-            Item::Row { .. } => 7.0 + f.ui.m.linespace + 2.0 * BD + 7.0,
+            Item::Row { .. } | Item::Check { .. } => 7.0 + f.ui.m.linespace + 2.0 * BD + 7.0,
         }
+    }
+
+    /// room taken by a checkbox and the gap after it
+    fn box_w(f: &Fonts) -> f32 {
+        f.ui.m.linespace * 0.8 + 8.0
     }
 
     fn size(&self, f: &Fonts) -> Vec2 {
@@ -53,6 +67,7 @@ impl PopupMenu {
             .map(|it| match it {
                 Item::Heading(t) => measure(&f.small_bold, t) + pad,
                 Item::Row { label, subtitle, .. } => measure(&f.ui, label).max(measure(&f.small, subtitle)) + pad,
+                Item::Check { label, .. } => measure(&f.ui, label) + Self::box_w(f) + pad,
             })
             .fold(0.0, f32::max);
         let h: f32 = self.items.iter().map(|it| Self::row_h(f, it)).sum();
@@ -84,6 +99,30 @@ impl PopupMenu {
                     match it {
                         Item::Heading(t) => {
                             ui::text(ui_ref, painter, Pos2::new(r.left() + 14.0 + BD, r.top() + 6.0 + BD), t, &f.small_bold, p.muted);
+                        }
+                        Item::Check { label, checked, cmd } => {
+                            let resp = ui.interact(r, Id::unique(("popup-row", i)), Sense::click());
+                            if resp.hovered() {
+                                painter.rect_filled(r, 0.0, p.select);
+                                ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                            }
+                            let ty = r.top() + 7.0 + BD;
+                            let side = (f.ui.m.linespace * 0.8).round();
+                            let b = Rect::from_min_size(Pos2::new(r.left() + 14.0 + BD, r.top() + ((r.height() - side) / 2.0).round()), Vec2::splat(side));
+                            if *checked {
+                                painter.rect_filled(b, ui::radius(3.0), p.accent);
+                                let tick = Stroke::new(2.0, p.accent_text);
+                                let at = |x: f32, y: f32| b.left_top() + Vec2::new(side * x, side * y);
+                                painter.line_segment([at(0.22, 0.52), at(0.42, 0.72)], tick);
+                                painter.line_segment([at(0.42, 0.72), at(0.78, 0.28)], tick);
+                            } else {
+                                painter.rect_filled(b, ui::radius(3.0), p.surface);
+                                painter.rect_stroke(b, ui::radius(3.0), Stroke::new(1.5, p.muted), StrokeKind::Inside);
+                            }
+                            ui::text(ui_ref, painter, Pos2::new(b.right() + 8.0, ty), label, &f.ui, p.text);
+                            if resp.clicked() {
+                                result = Some(Some(cmd.clone()));
+                            }
                         }
                         Item::Row { label, cmd, subtitle } => {
                             let resp = ui.interact(r, Id::unique(("popup-row", i)), Sense::click());

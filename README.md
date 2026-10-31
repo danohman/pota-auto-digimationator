@@ -60,7 +60,7 @@ All options are in the **Settings** panel (gear button at the top right, or Ctrl
 
 From top to bottom: a header (app icon, title, the **Auto CQ/Answer** and **Auto-Hunt** buttons, theme and Settings buttons), a status row, then the sections.
 
-**Status row**: WSJT-X connection, your station / band / frequency, band and mode drop-downs, a radio-state badge (TRANSMITTING, DECODING, RECEIVING, with a bar that follows WSJT-X's own period progress), who you're working, and the pota.app chip (spot counts and the time to the next refresh).
+**Status row**: WSJT-X connection, your station / band / frequency, band and mode drop-downs, the **Program Filter** drop-down (below), a radio-state badge (TRANSMITTING, DECODING, RECEIVING, which fills smoothly through the current T/R period), and the pota.app chip (spot counts and the time to the next refresh). In a narrow window the status row wraps onto more lines.
 
 **Sections**
 
@@ -73,7 +73,11 @@ From top to bottom: a header (app icon, title, the **Auto CQ/Answer** and **Auto
 | **Current POTA Spots (Worked/Skipped today)** | Spots you've already worked (green **W**) or skipped (amber **S**) |
 | **Worked today (date)** | Every QSO today (UTC), with a search box and a countdown to 0000Z |
 
-Hover a column heading for what it means. Right-click a spot row to Skip or Unskip it. Click a call or park to open it on pota.app. You can select any text with the mouse and copy it with Ctrl+C.
+Hover a column heading for what it means. Right-click a spot row to Skip or Unskip it, or to hide its program on this band and mode. Click a call or park to open it on pota.app. You can select any text with the mouse and copy it with Ctrl+C.
+
+**Spot rows.** The **Heard** column shows how long ago you last decoded a message from that station on this band. When a spotted station is decoded, its row pulses green (orange if its park is NEW to you, purple for an ATNO). A spot older than 10 minutes gets its age in faint red. Stations whose latest comment says QRT are dropped, since they are off the air.
+
+**Hiding programs.** A program is the part of a park number before the dash: `US` for US-1234, `JA` for JA-116273. The **Program Filter** drop-down in the status row, right after the mode drop-down, lists every program spotted on the current band and mode with its name and number of current spots, for example `AL (Albania) [12 current spots]`. Each has a checkbox: uncheck it to hide that program, and the list stays open so you can change several. Hiding applies only to **the band and mode WSJT-X is on** (JA can be hidden on 20m FT8 and still show on 40m FT8). A hidden program disappears from both spot lists, the new-parks section and the spot counts, and Auto-Hunt will not call those stations, even if they send CQ POTA. The drop-down turns red and reads "Program Filter: 2 hidden" while any are hidden here, and **Show all programs** undoes it. You can also right-click a spot and choose **Hide all JA spots**. To see and change everything at once, choose **Manage all filters...** at the top of the drop-down: the **Program filters** window lists every band and mode on the left (with a red count of what is hidden there) and, for the one you pick, a checkbox for each program spotted on it, with **Show all** and **Hide all** buttons, **Clear all filters** at the bottom, and **Done** to close it. If a station you have hidden is decoded, the drop-down pulses green (orange for a NEW park, purple for ATNO) so you know it is there. When a list is empty because of the filter it says "Some programs hidden" in red. The choice is remembered between runs. A QSO already under way carries on.
 
 **Changing band or mode**: use the drop-downs in the status row. They press WSJT-X's own band and mode buttons, and refuse while a QSO is in progress, Tx is on, an Auto mode is on or the Log QSO window is open.
 
@@ -81,7 +85,7 @@ Hover a column heading for what it means. Right-click a spot row to Skip or Unsk
 
 ### What it calls
 
-A decode is a candidate when it's a `CQ …` or an `… RR73` / `… 73` (the sender is about to free up) **and** one of these is true:
+A decode is a candidate when it's a `CQ …` or an `… RR73` / `… RRR` / `… 73` (the sender is about to free up) **and** one of these is true:
 
 - the message is `CQ POTA <call> …`
 - the callsign has an active spot on pota.app **on the band WSJT-X is on now**
@@ -202,8 +206,6 @@ cargo build --release
 ```
 
 Run `target\release\pota-auto-digimationator.exe`. Tests: `cargo test`.
-
-Pushing a version tag (`vX.Y.Z`) makes GitHub Actions build and publish the exe as a release.
 
 ## License
 

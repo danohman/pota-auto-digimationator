@@ -4,7 +4,7 @@
 //! settings and state files, and draws everything.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -14,6 +14,8 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, Vec2};
+
+mod filters;
 
 use crate::aclog::AclogClient;
 use crate::cat::RigClient;
@@ -317,6 +319,9 @@ pub struct App {
     notices: Vec<(String, String, usize, String)>,
     info_cache: Option<((u64, u32), Vec<StaticLine>)>,
     heard: HashMap<String, f64>,
+    /// a station whose program is hidden was just decoded: (pulse until, what its park is);
+    /// the Programs button pulses in that color
+    hidden_heard: Option<(f64, ParkKind)>,
     /// newest spot time seen per new-parks line (band, mode), and until when each pulses
     notice_seen: HashMap<(String, String), String>,
     notice_pulse: HashMap<(String, String), f64>,
@@ -351,6 +356,8 @@ pub struct App {
     popup: Option<PopupMenu>,
     /// the section window the open popup belongs to (None: the main window)
     popup_in: Option<Card>,
+    /// where the Programs menu opened (it reopens there after each pick) and in which window
+    programs_menu: Option<(Pos2, Option<Card>, f32)>,
     pops: std::collections::BTreeMap<Card, Pop>,
     /// where each section was last drawn in the main window (to size its pop-out window)
     card_rects: HashMap<Card, Rect>,
@@ -359,6 +366,8 @@ pub struct App {
     /// the section whose own window is being drawn
     in_pop: Option<Card>,
     dialog: Option<Dialog>,
+    /// the Program filters window, when open
+    filters: Option<filters::Filters>,
     tips: Tips,
     panes: Panes,
     next_tick: f64,
@@ -498,6 +507,7 @@ impl App {
         h.default_attempts = s.max_attempts;
         h.attempts_by_mode = s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), *v)).collect();
         h.min_snr = s.min_snr;
+        h.hidden_programs = s.hidden_programs.iter().filter(|k| k.split(' ').count() == 3).cloned().collect(); // (the spot cache is applied through set_spots)
         let counts: Rc<RefCell<Option<Arc<HuntCounts>>>> = Rc::new(RefCell::new(None));
         let c2 = counts.clone();
         h.park_is_new = Box::new(move |r| c2.borrow().as_ref().is_some_and(|c| c.park(r) == 0));
@@ -576,6 +586,7 @@ impl App {
             notices: vec![],
             info_cache: None,
             heard: HashMap::new(),
+            hidden_heard: None,
             notice_seen: HashMap::new(),
             notice_pulse: HashMap::new(),
             last_heard: HashMap::new(),
@@ -600,11 +611,13 @@ impl App {
             panel: Panel::default(),
             popup: None,
             popup_in: None,
+            programs_menu: None,
             pops,
             card_rects: HashMap::new(),
             pop_req: vec![],
             in_pop: None,
             dialog: None,
+            filters: None,
             tips: Tips::default(),
             panes: Panes::new(),
             next_tick: 0.0,
@@ -975,6 +988,12 @@ impl App {
         h.cq_text = self.s.cq_text.clone();
         h.attempts_by_mode = self.s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), (*v).max(1))).collect();
         h.min_snr = self.s.min_snr;
+        self.s.hidden_programs.retain(|k| k.split(' ').count() == 3); // "JA 20m FT8"; drops older whole-program entries
+        let hidden: HashSet<String> = self.s.hidden_programs.iter().cloned().collect();
+        if hidden != h.hidden_programs {
+            h.set_hidden_programs(hidden);
+            self.spots_key = None; // rebuild the lists without them
+        }
         if self.s.aclog_host.trim().is_empty() {
             self.s.aclog_host = "127.0.0.1".into();
         }
@@ -1424,7 +1443,21 @@ impl App {
         }
         let Some(p) = parse_message(&d.message) else { return };
         let call = base_call(&p.call);
-        if call == self.h.my_call() || spots.spots_for_mode(&call, band, &self.h.mode()).is_empty() {
+        if call == self.h.my_call() {
+            return;
+        }
+        if spots.spots_for_mode(&call, band, &self.h.mode()).is_empty() {
+            // maybe a station the program filter hides: the Programs button pulses for it
+            let counts = self.counts.borrow().clone();
+            let hidden = spots.hidden_spots_for_mode(&call, band, &self.h.mode());
+            if let Some(s) = hidden.first() {
+                let kind = match self.hunt_badges(s, counts.as_deref()).1.as_ref().map(|l| l.text.as_str()) {
+                    Some("ATNO") => ParkKind::Atno,
+                    Some("NEW") => ParkKind::New,
+                    _ => ParkKind::Plain,
+                };
+                self.hidden_heard = Some((self.now() + HEARD_SECONDS, kind));
+            }
             return;
         }
         self.heard.insert(call.clone(), self.now() + HEARD_SECONDS);
@@ -1762,7 +1795,8 @@ impl App {
         };
         let mode = self.h.mode();
         let list = spots.on(band, &mode);
-        self.waiting = if list.is_empty() { (format!("No spots found for {band} {mode}"), false) } else { (String::new(), true) };
+        let filtered = if self.hidden_here().is_empty() { "" } else { "\nSome programs hidden" }; // second line, red (list_overlay)
+        self.waiting = if list.is_empty() { (format!("No spots found for {band} {mode}{filtered}"), false) } else { (String::new(), true) };
         let now = Utc::now();
         let mut rows: Vec<(&pota_spots::Spot, &'static str)> = list
             .iter()
@@ -1825,7 +1859,7 @@ impl App {
                 park.link_tip = Some(if s.location.is_empty() {
                     "Click to open on pota.app".to_string()
                 } else {
-                    format!("Park Location: {}\nClick to open on pota.app", s.location)
+                    format!("Park Location: {}\nClick to open on pota.app", crate::programs::describe_location(&s.location))
                 });
             }
             park.lead = lead;
@@ -1899,7 +1933,7 @@ impl App {
                 park_cell.link = Some(format!("https://pota.app/park/{}", e.ref_));
                 let location = self.h.spots.as_ref().and_then(|t| t.all().find(|s| s.reference == e.ref_ && !s.location.is_empty()).map(|s| s.location.clone()));
                 park_cell.link_tip = Some(match location {
-                    Some(l) => format!("Park Location: {l}\nClick to open on pota.app"),
+                    Some(l) => format!("Park Location: {}\nClick to open on pota.app", crate::programs::describe_location(&l)),
                     None => "Click to open on pota.app".to_string(),
                 });
             }
@@ -2293,6 +2327,11 @@ impl App {
         let station = self.chip(&station_text, &f.ui);
         let band_dd = self.chip(&band_text, &f.ui).min_text("160m ▾").hover(p.neutral_hover);
         let mode_dd = self.chip(&mode_text, &f.ui).min_text("FT8 ▾").hover(p.neutral_hover);
+        let (prog_text, prog_fill, prog_fg, prog_tip) = self.programs_look();
+        let prog_dd = self.chip(&prog_text, &f.ui).colors(prog_fill, prog_fg).hover(if self.hidden_here().is_empty() { p.neutral_hover } else { self.filter_red(true) });
+        if self.hidden_heard.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(40));
+        }
         let spots_text = self.spots_text.clone();
         let spots = self.chip(&spots_text, &f.ui).dot(Some(if self.spots_failed { p.bad } else { p.accent }));
         let radio = if connected { self.radio } else { None };
@@ -2315,12 +2354,13 @@ impl App {
         }
         // Flow the chips left to right, wrapping to a new row when the window is too
         // narrow; the pota.app chip goes at the right of the last row (or on a row of its own).
-        // kinds: 0 connection, 1 station, 2 band, 3 mode, 4 radio badge, 6 spots
+        // kinds: 0 connection, 1 station, 2 band, 3 mode, 4 radio badge, 5 programs, 6 spots
         let mut items: Vec<(u8, Vec2, f32)> = vec![(0, conn.size(ui), 8.0)];
         if connected {
             items.push((1, station.size(ui), 6.0));
             items.push((2, band_dd.size(ui), 6.0));
-            items.push((3, mode_dd.size(ui), 8.0));
+            items.push((3, mode_dd.size(ui), 6.0));
+            items.push((5, prog_dd.size(ui), 8.0));
         }
         if radio.is_some() {
             items.push((4, tx.size(ui), 8.0));
@@ -2367,6 +2407,13 @@ impl App {
             self.tips.tip(&resp, "WSJT-X's mode; click to change it", 500, TipAt::Below(r));
             if resp.clicked() {
                 self.retune_menu("mode");
+            }
+            let r = place(prog_dd.size(ui), spot(5).unwrap());
+            let resp = prog_dd.show(ui, Id::unique("programs-dd"), r, true);
+            self.tips.tip(&resp, &prog_tip, 500, TipAt::Below(r));
+            if resp.clicked() {
+                let avail = ui.ctx().content_rect().height();
+                self.open_programs_menu(Pos2::new(r.left(), r.bottom() + 2.0), None, avail);
             }
         }
         if let Some((bx, by)) = spot(4) {
@@ -2933,6 +2980,156 @@ impl App {
         }
     }
 
+    /// The Program Filter chip's red while programs are hidden. Dark mode: the neutral chip
+    /// with 25% of a bright red mixed in. Light mode needs a deeper red (70% of a stronger
+    /// one), because the same mix over the pale gray chip looked pink (user report 2026-10-30).
+    fn filter_red(&self, hover: bool) -> Color32 {
+        let p = &self.p;
+        let base = if hover { p.neutral_hover } else { p.neutral };
+        if self.theme_name == "dark" {
+            theme::mix(base, Color32::from_rgb(255, 64, 64), if hover { 0.33 } else { 0.25 })
+        } else {
+            theme::mix(base, Color32::from_rgb(210, 40, 36), if hover { 0.8 } else { 0.7 })
+        }
+    }
+
+    /// The band and mode WSJT-X is on (mode upper case), when known.
+    fn combo(&self) -> Option<(String, String)> {
+        self.h.band().map(|b| (b.to_string(), self.h.mode().to_uppercase()))
+    }
+
+    /// The programs hidden on the current band and mode.
+    fn hidden_here(&self) -> HashSet<String> {
+        let Some((band, mode)) = self.combo() else { return HashSet::new() };
+        self.hidden_at(&band, &mode)
+    }
+
+    /// The programs hidden on `band` in `mode` (upper case).
+    fn hidden_at(&self, band: &str, mode: &str) -> HashSet<String> {
+        let tail = format!(" {band} {mode}");
+        self.s.hidden_programs.iter().filter_map(|k| k.strip_suffix(tail.as_str())).map(str::to_string).collect()
+    }
+
+    /// How the "Programs" chip in the status row (after the mode drop-down) looks: its text,
+    /// colors and tooltip. Opens the list of programs (the part of a park number before the
+    /// dash) to show or hide on the band and mode WSJT-X is on (user request 2026-10-30: only
+    /// that combination). Accent colored while any program is hidden here, so a filtered
+    /// list never goes unnoticed, and it pulses like a spot row (green, orange NEW, purple
+    /// ATNO) when a station the filter hides is decoded. It lives in the status row, which
+    /// wraps in a narrow window, so it is never lost (it was first in the Spots header and
+    /// the user didn't like it vanishing there).
+    fn programs_look(&mut self) -> (String, Color32, Color32, String) {
+        let (p, now) = (self.p.clone(), self.now());
+        let (band, mode) = self.combo().unwrap_or_default();
+        let n = self.hidden_here().len();
+        let elsewhere = self.s.hidden_programs.len() - n;
+        let text = if n == 0 { "Program Filter ▾".to_string() } else { format!("Program Filter: {n} hidden ▾") };
+        // red while a filter is on (see filter_red)
+        let (mut fill, mut fg) = if n == 0 { (p.neutral, p.neutral_text) } else { (self.filter_red(false), p.neutral_text) };
+        if let Some((until, kind)) = self.hidden_heard {
+            if until > now {
+                let c = self.row_colors();
+                fill = match kind {
+                    ParkKind::Plain => c.heard,
+                    ParkKind::New => c.heard_new,
+                    ParkKind::Atno => c.heard_atno,
+                };
+                fg = p.text;
+            } else {
+                self.hidden_heard = None;
+            }
+        }
+        let mut tip = if n == 0 {
+            format!("Hide the spots of programs you don't want to see on {band} {mode},\nsuch as JA (Japan) or US. Other bands and modes are not affected")
+        } else {
+            format!("{n} hidden on {band} {mode}: in the lists, the new-parks card,\nthe spot counts and Auto-Hunt. Click to change")
+        };
+        if elsewhere > 0 {
+            tip += &format!("\n({elsewhere} more hidden on other bands and modes)");
+        }
+        (text, fill, fg, tip)
+    }
+
+    /// The Programs menu for the current band and mode: a tick for each program shown, the
+    /// spot count beside it. Picking one toggles it and the menu reopens where it was, so
+    /// several can be changed in a row. Hidden programs always get a row, the rest fill what
+    /// fits the window, busiest first.
+    fn open_programs_menu(&mut self, anchor: Pos2, card: Option<Card>, avail_h: f32) {
+        let Some((band, mode)) = self.combo() else { return };
+        let row_h = self.f.ui.m.linespace + 18.0;
+        let max_rows = (((avail_h - 140.0) / row_h) as usize).max(6);
+        let mut progs: Vec<(String, usize)> = self.h.spots.as_ref().map(|t| t.programs(&band, &mode)).unwrap_or_default();
+        let hidden = self.hidden_here();
+        for hid in &hidden {
+            if !progs.iter().any(|p| &p.0 == hid) {
+                progs.push((hid.clone(), 0));
+            }
+        }
+        let mut room = max_rows.saturating_sub(hidden.len());
+        let total = progs.len();
+        progs.retain(|p| {
+            hidden.contains(&p.0) || {
+                let fits = room > 0;
+                room = room.saturating_sub(1);
+                fits
+            }
+        });
+        let mut items = vec![Item::Heading(format!("Show/hide spots for these programs on {band} {mode} (checked = shown)"))];
+        items.push(Item::Row {
+            label: "Manage all filters...".into(),
+            cmd: Some(MenuCmd::ManageFilters),
+            subtitle: "Every band and mode in one window".into(),
+        });
+        for (prog, n) in &progs {
+            let shown = !hidden.contains(prog);
+            let name = crate::programs::name(prog).unwrap_or("(unknown_name)");
+            let spots = format!("[{n} current spot{}]", if *n == 1 { "" } else { "s" });
+            items.push(Item::Check {
+                label: if shown { format!("{prog} ({name}) {spots}") } else { format!("{prog} ({name}) {spots} [hidden]") },
+                checked: shown,
+                cmd: MenuCmd::ToggleProgram(prog.clone()),
+            });
+        }
+        if progs.len() < total {
+            items.push(Item::Heading(format!("{} more: right-click a spot to hide its program", total - progs.len())));
+        }
+        if !hidden.is_empty() {
+            items.push(Item::Row { label: format!("Show all programs on {band} {mode}"), cmd: Some(MenuCmd::ShowAllPrograms), subtitle: String::new() });
+        }
+        self.popup = Some(PopupMenu::new(items, anchor, self.now()));
+        self.popup_in = card;
+        self.programs_menu = Some((anchor, card, avail_h));
+    }
+
+    /// Hide or show one program on the current band and mode (None: show all of them
+    /// there) in every list, count and the hunt.
+    fn set_program_hidden(&mut self, prog: Option<(&str, bool)>) {
+        let Some((band, mode)) = self.combo() else { return };
+        self.set_program_hidden_at(&band, &mode, prog);
+    }
+
+    /// The same for any band and mode (the Program filters window).
+    fn set_program_hidden_at(&mut self, band: &str, mode: &str, prog: Option<(&str, bool)>) {
+        match prog {
+            Some((p, true)) => {
+                let key = pota_spots::hide_key(p, band, mode);
+                if !self.s.hidden_programs.contains(&key) {
+                    self.s.hidden_programs.push(key);
+                    self.s.hidden_programs.sort();
+                }
+            }
+            Some((p, false)) => {
+                let key = pota_spots::hide_key(p, band, mode);
+                self.s.hidden_programs.retain(|k| *k != key);
+            }
+            None => {
+                let tail = format!(" {band} {mode}");
+                self.s.hidden_programs.retain(|k| !k.ends_with(&tail));
+            }
+        }
+        self.settings_changed();
+    }
+
     fn draw_spots_card(&mut self, ui: &mut Ui, rect: Rect) {
         let (p, f) = (self.p.clone(), self.f.clone());
         let inner = rect.shrink(1.0);
@@ -2961,10 +3158,14 @@ impl App {
     /// The centered "waiting" / "No spots found" overlay over a spot list.
     fn list_overlay(&mut self, ui: &mut Ui, rect: Rect, text: &str, spin: bool) {
         let (p, f) = (self.p.clone(), self.f.clone());
+        // an optional second line, in red, after a newline ("Some programs hidden")
+        let (text, note) = text.split_once('\n').unwrap_or((text, ""));
         let lw = measure(&f.heading, text) + 2.0;
+        let nw = if note.is_empty() { 0.0 } else { measure(&f.ui, note) + 2.0 };
         let lh = f.heading.m.linespace + 2.0;
-        let bw = lw.max(if spin { 72.0 } else { 0.0 });
-        let bh = if spin { 72.0 + 14.0 + lh } else { lh };
+        let rows = if note.is_empty() { 1.0 } else { 2.0 };
+        let bw = lw.max(nw).max(if spin { 72.0 } else { 0.0 });
+        let bh = if spin { 72.0 + 14.0 + lh } else { lh * rows };
         let c = Pos2::new(rect.left() + rect.width() * 0.5, rect.top() + rect.height() * 0.55);
         let b = Rect::from_center_size(c, Vec2::new(bw, bh));
         let b = Rect::from_min_size(b.min.round(), b.size());
@@ -2973,7 +3174,10 @@ impl App {
         if spin {
             self.spinner(painter, Pos2::new(b.center().x, b.top() + 36.0));
         }
-        ui::text(ui, painter, Pos2::new(b.center().x - lw / 2.0 + 1.0, b.bottom() - lh + 1.0), text, &f.heading, p.muted);
+        ui::text(ui, painter, Pos2::new(b.center().x - lw / 2.0 + 1.0, b.bottom() - lh * rows + 1.0), text, &f.heading, p.muted);
+        if !note.is_empty() {
+            ui::text(ui, painter, Pos2::new(b.center().x - nw / 2.0 + 1.0, b.bottom() - lh + 1.0), note, &f.ui, p.bad);
+        }
     }
 
     /// The big "waiting" spinner (72 px, 7 px line).
@@ -3093,7 +3297,15 @@ impl App {
                     subtitle: "Not today on this band, mode and park; stops Tx if calling them".into(),
                 }
             };
-            let items = vec![Item::Heading(head), row];
+            let mut items = vec![Item::Heading(head), row];
+            let prog = pota_spots::program_of(&d.ref_);
+            if !prog.is_empty() {
+                items.push(Item::Row {
+                    label: format!("Hide all {prog} spots"),
+                    cmd: Some(MenuCmd::HideProgram(prog.to_string())),
+                    subtitle: "On this band and mode only; bring them back with the Program Filter drop-down".into(),
+                });
+            }
             self.popup = Some(PopupMenu::new(items, pos, self.now()));
             self.popup_in = self.in_pop;
         }
@@ -3105,6 +3317,16 @@ impl App {
             MenuCmd::Unskip { call, ref_ } => self.h.unskip(&call, &ref_),
             MenuCmd::Band(b) => self.retune(Some(b), None),
             MenuCmd::Mode(m) => self.retune(None, Some(m)),
+            MenuCmd::ToggleProgram(prog) => {
+                let hide = !self.hidden_here().contains(&prog);
+                self.set_program_hidden(Some((&prog, hide)));
+                if let Some((at, card, avail)) = self.programs_menu {
+                    self.open_programs_menu(at, card, avail); // stays open for the next pick
+                }
+            }
+            MenuCmd::HideProgram(prog) => self.set_program_hidden(Some((&prog, true))),
+            MenuCmd::ShowAllPrograms => self.set_program_hidden(None),
+            MenuCmd::ManageFilters => self.filters = Some(filters::Filters::new(self.combo())),
         }
         self.drain_hunter();
     }
@@ -3709,6 +3931,7 @@ impl eframe::App for App {
         }
         self.wizard_frame(&ctx, ui); // (a re-run from Settings covers the window)
         self.draw_dialog(&ctx, screen);
+        self.draw_filters(&ctx, screen);
         if self.demo_tip {
             let at = Rect::from_min_size(Pos2::new(200.0, 200.0), Vec2::new(300.0, 20.0));
             self.tips.tip_area(Id::unique("demo-tip"), true, "Click to turn Auto CQ/Answer on or off.\nCalls CQ when idle and answers stations that call you;\nYou've hunted K4SWL 2 times", 0, TipAt::Below(at));

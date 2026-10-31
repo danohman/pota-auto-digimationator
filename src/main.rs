@@ -19,6 +19,7 @@ mod popup;
 mod pota_auth;
 mod pota_spots;
 mod presence;
+mod programs;
 mod respot;
 mod settings;
 mod sound;

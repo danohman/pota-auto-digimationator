@@ -438,6 +438,24 @@ fn park_text_cq_pota_or_unknown() {
     assert_eq!(other.h.park_text(&a), "CQ POTA (Not spotted)");
 }
 
+#[test]
+fn hidden_program_station_is_not_offered_but_unspotted_cq_pota_is() {
+    let mut s = T::new();
+    s.h.set_hidden_programs(["US 20m FT8".to_string()].into_iter().collect());
+    s.h.enabled = false;
+    // N5XYZ is spotted at US-1234, which the filter hides: not "[not spotted]", not offered
+    s.cycle(&[dec("CQ POTA N5XYZ EM00")]);
+    assert!(!s.logged("N5XYZ"));
+    assert!(s.labels().is_empty());
+    // a station with no spot at all that sends CQ POTA is still offered
+    s.cycle(&[dec("CQ POTA K1ABC FN42")]);
+    assert!(s.logged("K1ABC (CQ POTA)") && s.logged("[not spotted]"));
+    // shown again on another band's filter only: the hide is per band and mode
+    s.h.set_hidden_programs(["US 40m FT8".to_string()].into_iter().collect());
+    s.cycle(&[dec("CQ POTA N5XYZ EM00")]);
+    assert!(s.logged("N5XYZ (CQ)"));
+}
+
 // --- Auto CQ/Answer --------------------------------------------------------
 
 #[test]
