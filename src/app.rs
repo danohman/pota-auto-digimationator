@@ -471,6 +471,10 @@ fn lerp_rgb(a: (u8, u8, u8), b: (u8, u8, u8), k: f64) -> Color32 {
 /// some Windows 10 OpenGL drivers). Stepped, the same few textures are reused.
 const PULSE_STEPS: f64 = 16.0;
 
+/// The waiting spinner's frame interval in ms and how many degrees it turns each frame.
+const SPIN_MS: f64 = 80.0;
+const SPIN_STEP: f32 = 30.0;
+
 fn pulse(now: f64, period: f64) -> f64 {
     let k = (1.0 - (2.0 * std::f64::consts::PI * (now % period) / period).cos()) / 2.0;
     (k * PULSE_STEPS).round() / PULSE_STEPS
@@ -3215,7 +3219,8 @@ impl App {
         let p = &self.p;
         let r = 36.0 - 7.0 / 2.0 - 1.0;
         painter.circle_stroke(center, r, Stroke::new(7.0, p.border));
-        let start = ((self.now() / 0.03) as f32 * -12.0).rem_euclid(360.0).to_radians();
+        // one step per frame (`SPIN_MS`), so the ring turns evenly at the slow frame rate
+        let start = ((self.now() * 1000.0 / SPIN_MS).floor() as f32 * -SPIN_STEP).rem_euclid(360.0).to_radians();
         let pts: Vec<Pos2> = (0..=40)
             .map(|i| {
                 let a = start + (100f32.to_radians()) * i as f32 / 40.0;
@@ -3234,15 +3239,12 @@ impl App {
         !demo_skip && !(self.connected() && self.wsjtx_decoded)
     }
 
-    fn wsjtx_waiting(&mut self, ctx: &egui::Context) {
+    fn wsjtx_waiting(&mut self) {
         if self.h.band().is_some() {
             self.wsjtx_seen = true;
         }
         if !self.last_wsjtx.is_some_and(|t| t.elapsed().as_secs_f64() < 35.0) {
             self.wsjtx_decoded = false; // closed or silent: wait for a decode again
-        }
-        if self.waiting_for_wsjtx() {
-            ctx.request_repaint_after(Duration::from_millis(40));
         }
     }
 
@@ -3945,7 +3947,7 @@ impl eframe::App for App {
         if area.width() > 20.0 && area.height() > 20.0 {
             self.draw_panes(ui, area);
         }
-        self.wsjtx_waiting(&ctx);
+        self.wsjtx_waiting();
         // the settings panel, popups and dialogs
         let mut panel = std::mem::take(&mut self.panel);
         panel.show(self, &ctx, ui);
@@ -3996,12 +3998,22 @@ impl eframe::App for App {
             self.panel.clear_selection();
         }
         // keep animations and timers running
+        // Every frame costs CPU (and, on some Windows 10 graphics drivers, memory), so
+        // idle redraws as seldom as the clocks on screen allow: a pulse needs 40 ms, a
+        // spinner 80 ms, 250 ms while WSJT-X is connected, otherwise once a second, or sooner when
+        // a timer is due.
         let busy = self.radio.is_some() || self.h.target().is_some() || !self.heard.is_empty()
             || self.notice_pulse.values().any(|u| *u > now)
-            || (!self.waiting.0.is_empty() && self.waiting.1) || self.dialog.is_some()
+            || self.dialog.is_some() || self.filters.is_some() || self.debug.is_some()
             || self.log.buttons_mut().any(|b| b.glowing)
             || self.h.enabled || self.h.cq_enabled;
-        ctx.request_repaint_after(Duration::from_millis(if busy { 40 } else { 100 }));
+        let spinning = (!self.waiting.0.is_empty() && self.waiting.1) || self.waiting_for_wsjtx();
+        // (with WSJT-X talking, the hunter's tick still settles decode cycles and presses Log QSO)
+        let mut wait_ms = if busy { 40.0 } else if spinning { SPIN_MS } else if self.connected() { 250.0 } else { 1000.0 };
+        for t in self.timers.iter().map(|(at, _)| *at).chain(self.layout_due) {
+            wait_ms = wait_ms.min(((t - now) * 1000.0).max(0.0));
+        }
+        ctx.request_repaint_after(Duration::from_millis(wait_ms.ceil() as u64));
     }
 
     fn on_exit(&mut self) {

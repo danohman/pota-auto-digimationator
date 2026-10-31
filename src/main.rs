@@ -161,7 +161,8 @@ fn main() -> eframe::Result {
     result
 }
 
-/// Which graphics adapter to draw with when the user hasn't forced a backend. wgpu's own
+/// Which graphics adapter to draw with when the user hasn't forced a backend: a usable one, never a software
+/// rasterizer (it uses all the CPU) while a GPU exists, then OpenGL last. wgpu's own
 /// pick can land on OpenGL, which leaks memory on Intel integrated graphics under
 /// Windows 10 (2026-10-31), so OpenGL is the last resort: faster kinds of GPU first, then
 /// DirectX 12 on Intel (its Vulkan drivers are the shakiest) or Vulkan elsewhere.
@@ -185,7 +186,9 @@ fn pick_adapter(adapters: &[eframe::wgpu::Adapter], surface: Option<&eframe::wgp
                 (Backend::Dx12, true) | (Backend::Vulkan, false) => 0,
                 _ => 1,
             };
-            (!usable, backend == 2, kind, backend)
+            // software rasterizers (WARP) take every core, OpenGL leaks on Intel: both last
+            let software = i.device_type == DeviceType::Cpu;
+            (!usable, software, backend == 2, kind, backend)
         })
         .cloned()
         .ok_or_else(|| "no graphics adapter found".to_string())
