@@ -192,7 +192,7 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 ## Troubleshooting
 
 - **High memory or CPU use on Windows 10 with Intel HD Graphics.** Some Intel HD Graphics drivers on Windows 10 are known to leak memory when a program draws through OpenGL, and to use all of the CPU when Windows falls back to its software renderer. If the program's memory keeps growing, or it uses far more CPU than it should, open **Settings > Appearance > Graphics**, pick **DirectX 12**, **Vulkan** or **OpenGL**, restart, and see which one stays steady. Updating the graphics driver from Intel or your PC maker may also help.
-- **A better fix is to move off Windows 10.** Windows 10 reached the end of its support on October 14, 2025: it no longer gets security updates, so running it on a computer that is on the internet is a risk, and that has nothing to do with this program. If the PC can run Windows 11, upgrade it. If it can't, consider a newer computer, or a Linux distribution for the old one.
+- **A better fix is to move off Windows 10.** Windows 10 reached the end of its support on October 14, 2025: it no longer gets security updates, so running it on a computer that is on the internet is a risk, and that has nothing to do with this program. If the PC can run Windows 11, upgrade it. If it can't, consider a newer computer.
 
 ## Safety
 
