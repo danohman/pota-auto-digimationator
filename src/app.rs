@@ -1913,7 +1913,7 @@ impl App {
                 park.link_tip = Some(if s.location.is_empty() {
                     "Click to open on pota.app".to_string()
                 } else {
-                    format!("Park Location: {}\nClick to open on pota.app", crate::programs::describe_location(&s.location))
+                    format!("{}\nClick to open on pota.app", crate::programs::location_tip(&s.location))
                 });
             }
             park.lead = lead;
@@ -1987,7 +1987,7 @@ impl App {
                 park_cell.link = Some(format!("https://pota.app/park/{}", e.ref_));
                 let location = self.h.spots.as_ref().and_then(|t| t.all().find(|s| s.reference == e.ref_ && !s.location.is_empty()).map(|s| s.location.clone()));
                 park_cell.link_tip = Some(match location {
-                    Some(l) => format!("Park Location: {}\nClick to open on pota.app", crate::programs::describe_location(&l)),
+                    Some(l) => format!("{}\nClick to open on pota.app", crate::programs::location_tip(&l)),
                     None => "Click to open on pota.app".to_string(),
                 });
             }
