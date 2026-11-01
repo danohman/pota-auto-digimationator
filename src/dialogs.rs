@@ -26,6 +26,8 @@ pub enum DialogKind {
     CheckFailed(String),
     /// the graphics backend changed; offers Restart now / Later
     RestartGpu,
+    /// Settings > Reset: put every setting back to its default; offers Reset / Cancel
+    ResetSettings,
 }
 
 impl DialogKind {
@@ -87,7 +89,7 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             (format!("Enable {what}"), "You must be at your station".into(), p.bad, vec![
                 para("As the control operator, you are required to be present and in control of your station whenever it is transmitting.", &f.ui, p.text, 10.0),
                 para(&format!("Fully automated QSOs are prohibited. {what} only helps you call stations; it does not replace you. Stay at the radio, watch what it does, and turn it off if anything looks wrong."), &f.ui, p.text, 8.0),
-                para(&last, &f.small, p.muted, 12.0),
+                para(&last, &f.small, if dry { p.muted } else { p.bad }, 12.0),
             ])
         }
         DialogKind::PresenceAsk => ("Are you still there?".into(), "Are you still there?".into(), p.warn, vec![
@@ -122,6 +124,10 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
         DialogKind::RestartGpu => ("Restart needed".into(), "Restart to change the graphics backend".into(), p.blue, vec![
             para("The new graphics backend is used the next time the program starts. Restart now closes the app normally (the radio is put back as it was) and opens it again.", &f.ui, p.text, 8.0),
         ]),
+        DialogKind::ResetSettings => ("Reset settings".into(), "Reset all settings to their defaults?".into(), p.bad, vec![
+            para("Every setting goes back to its default: radio and logging choices, your pota.app login, sounds, window layout and text size. This cannot be undone.", &f.ui, p.text, 8.0),
+            para("Today's worked list and your logs are not touched. The app restarts to apply the defaults.", &f.ui, p.text, 8.0),
+        ]),
         DialogKind::CheckFailed(e) => ("Update check failed".into(), "Couldn't check for updates".into(), p.bad, vec![
             para(e, &f.ui, p.text, 8.0),
         ]),
@@ -154,6 +160,11 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
         ),
         DialogKind::UpdateAvail(_) => (
             Some(Rnd::new("Update now", ui_bold).pill().pad(18.0, 7.0).colors(p.blue, p.blue_text).hover(p.blue_hover)),
+            Some(Rnd::new("Cancel", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
+            0.0,
+        ),
+        DialogKind::ResetSettings => (
+            Some(Rnd::new("Reset all settings", ui_bold).pill().pad(18.0, 7.0).colors(p.off, Color32::WHITE).hover(p.off_hover)),
             Some(Rnd::new("Cancel", ui_bold).pill().pad(18.0, 7.0).colors(p.neutral, p.neutral_text).hover(p.neutral_hover)),
             0.0,
         ),
@@ -227,7 +238,7 @@ pub fn show(d: &mut Dialog, app: &mut App, ctx: &egui::Context) -> Outcome {
         }
         let right = full.right() - 24.0;
         match kind {
-            DialogKind::ConfirmHunt | DialogKind::ConfirmCq | DialogKind::UpdateAvail(_) | DialogKind::RestartGpu => {
+            DialogKind::ConfirmHunt | DialogKind::ConfirmCq | DialogKind::UpdateAvail(_) | DialogKind::RestartGpu | DialogKind::ResetSettings => {
                 y += 20.0;
                 let (e, c) = (b1.as_ref().unwrap(), b2.as_ref().unwrap());
                 let es = e.size(ui);

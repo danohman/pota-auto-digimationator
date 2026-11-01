@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub struct Layout {
@@ -126,9 +126,6 @@ pub struct Settings {
     /// Tk geometry, "WxH+X+Y"
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window: Option<String>,
-    /// keys this version doesn't know, kept as they are
-    #[serde(flatten)]
-    pub extra: Map<String, Value>,
 }
 
 impl Default for Settings {
@@ -179,7 +176,6 @@ impl Default for Settings {
             popouts: BTreeMap::new(),
             sorts: BTreeMap::new(),
             window: None,
-            extra: Map::new(),
         }
     }
 }
@@ -265,7 +261,36 @@ pub fn load(path: &Path) -> Settings {
     s
 }
 
+/// Rewrite settings.json without keys this version doesn't use (called at start-up, after `load`).
+pub fn clean_file(path: &Path, s: &Settings) {
+    let Ok(text) = std::fs::read_to_string(path) else { return };
+    let (Ok(Value::Object(file)), Ok(Value::Object(known))) = (serde_json::from_str::<Value>(&text), serde_json::to_value(s)) else { return };
+    if file.keys().any(|k| !known.contains_key(k)) {
+        let _ = save(path, s);
+    }
+}
+
 pub fn save(path: &Path, s: &Settings) -> std::io::Result<()> {
     let text = serde_json::to_string(s).map_err(std::io::Error::other)?;
     std::fs::write(path, text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unknown_keys_are_dropped_on_save() {
+        let dir = std::env::temp_dir().join(format!("pota-settings-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, r#"{"udp_port": 2238, "long_gone_option": true}"#).unwrap();
+        let s = load(&path);
+        assert_eq!(s.udp_port, 2238);
+        save(&path, &s).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(!text.contains("long_gone_option"));
+        assert!(text.contains("2238"));
+    }
 }

@@ -65,15 +65,17 @@ pub enum Tab {
     Logging,
     Connect,
     Appearance,
+    Reset,
     About,
 }
 
-pub const TABS: [(Tab, &str); 6] = [
+pub const TABS: [(Tab, &str); 7] = [
     (Tab::Hunting, "Hunting"),
     (Tab::Radio, "Radio"),
     (Tab::Logging, "Logging"),
     (Tab::Connect, "Connections"),
     (Tab::Appearance, "Appearance"),
+    (Tab::Reset, "Reset"),
     (Tab::About, "About"),
 ];
 
@@ -138,6 +140,7 @@ enum Do {
     SavePota,
     SaveRespot,
     RunWizard,
+    ResetSettings,
     TestCat,
     CheckPota,
 }
@@ -731,6 +734,18 @@ impl Panel {
                             let r = Rect::from_min_size(Pos2::new(rect.right() - bsz.x, rect.top() + ((rect.height() - bsz.y) / 2.0).floor()), bsz);
                             if l.button(&btn, r, Id::unique("run-wizard"), true) {
                                 l.act.push(Do::RunWizard);
+                            }
+                        }
+                    }
+                    Tab::Reset => {
+                        l.section("Reset");
+                        let btn = l.small_button("Reset all settings");
+                        let bsz = btn.size(l.ui);
+                        let rect = l.row("Reset all settings", "Puts every app setting back to its default; you are asked first", bsz.x + 16.0, bsz.y, p.text);
+                        if paint {
+                            let r = Rect::from_min_size(Pos2::new(rect.right() - bsz.x, rect.top() + ((rect.height() - bsz.y) / 2.0).floor()), bsz);
+                            if l.button(&btn, r, Id::unique("reset-settings"), true) {
+                                l.act.push(Do::ResetSettings);
                             }
                         }
                     }
@@ -1497,6 +1512,7 @@ impl Panel {
                     self.close(now);
                     app.start_wizard();
                 }
+                Do::ResetSettings => app.ask_reset(),
                 Do::Changed => app.settings_changed(),
                 Do::Theme(mode) => app.set_theme(ctx, mode),
                 Do::FontSize(pt) => app.set_font_size(ctx, pt),

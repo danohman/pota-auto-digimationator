@@ -880,7 +880,7 @@ fn calling_line_names_the_station_not_the_message() {
     s.h.spots = Some(table(json!([{"activator": "KB3EOF", "frequency": "14074", "mode": "FT8",
         "reference": "US-1574"}]), s.t.get()));
     s.cycle(&[dec("K2DM KB3EOF 73")]);
-    assert!(s.logs.iter().any(|(_, t)| t.starts_with("CALLING KB3EOF  (")));
+    assert!(s.logs.iter().any(|(_, t)| t.starts_with("Calling KB3EOF  (")));
 }
 
 #[test]
@@ -890,13 +890,13 @@ fn new_parks_only_calls_only_parks_never_hunted() {
     s.h.spots = Some(table(json!([{"activator": "KB3EOF", "frequency": "14074", "mode": "FT8",
         "reference": "US-1574"}]), s.t.get()));
     s.cycle(&[dec("K2DM KB3EOF 73")]);
-    assert!(!s.logs.iter().any(|(_, t)| t.starts_with("CALLING")));
+    assert!(!s.logs.iter().any(|(_, t)| t.starts_with("Calling KB3EOF  (")));
     s.h.park_is_new = Box::new(|r| r == "US-9999");
     s.cycle(&[dec_at("K2DM KB3EOF 73", -5, 10_530_000)]);
-    assert!(!s.logs.iter().any(|(_, t)| t.starts_with("CALLING")));
+    assert!(!s.logs.iter().any(|(_, t)| t.starts_with("Calling KB3EOF  (")));
     s.h.park_is_new = Box::new(|r| r == "US-1574");
     s.cycle(&[dec_at("K2DM KB3EOF 73", -5, 10_545_000)]);
-    assert!(s.logs.iter().any(|(_, t)| t.starts_with("CALLING KB3EOF")));
+    assert!(s.logs.iter().any(|(_, t)| t.starts_with("Calling KB3EOF  (")));
 }
 
 #[test]

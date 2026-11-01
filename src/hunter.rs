@@ -1897,7 +1897,7 @@ impl Hunter {
         t.replied_at = self.now();
         t.signoff = !sign_off(&best.decode.message).is_empty();
         self.set_target(Some(t));
-        self.log_with(format!("CALLING {label}"), Tag::Call, Self::qso_buttons(&best.call, &best.ref_, true), false);
+        self.log_with(format!("Calling {label} (Auto hunt enabled)"), Tag::Call, Self::qso_buttons(&best.call, &best.ref_, true), false);
         true
     }
 
@@ -1942,7 +1942,7 @@ impl Hunter {
                 self.log_with(format!("DRY RUN: would answer {call}  [{label}]"), Tag::Call, b, false);
                 return;
             }
-            let how = if self.cq_enabled { "Auto CQ/Answer" } else { "Auto-Hunt" };
+            let how = if self.cq_enabled { "Auto CQ/Answer" } else { "Auto answer enabled" };
             self.answer_caller(&d, &call, received, how);
             return;
         }

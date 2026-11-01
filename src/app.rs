@@ -408,6 +408,8 @@ pub struct App {
     pub wizard: Option<crate::panel::Wizard>,
     /// first run: settings.json does not exist yet, nothing is written until the wizard finishes
     unsaved: bool,
+    /// the settings were reset and the app is restarting: leave settings.json alone
+    resetting: bool,
 }
 
 pub fn mono_clock(t0: Instant) -> impl Fn() -> f64 {
@@ -486,6 +488,7 @@ impl App {
         ctx.set_fonts(fonts.1);
         let f = fonts.0;
         let s = settings::load(&dir.join("data").join("settings.json"));
+        settings::clean_file(&dir.join("data").join("settings.json"), &s);
         let repaint = ctx.clone();
         let post: Post = Arc::new(move |e| {
             let _ = tx.send(e);
@@ -665,6 +668,7 @@ impl App {
             wsjtx_decoded: false,
             wizard: None,
             unsaved: first_run,
+            resetting: false,
         };
         // demo screenshots skip the WSJT-X popup unless they ask for it ("wait")
         app.wsjtx_seen = !app.demo.is_empty() && !app.demo.iter().any(|s| s == "wait");
@@ -799,6 +803,25 @@ impl App {
         self.dialog = Some(Dialog::new(DialogKind::RestartGpu));
     }
 
+    /// Settings > Reset: ask first.
+    pub fn ask_reset(&mut self) {
+        self.dialog = Some(Dialog::new(DialogKind::ResetSettings));
+    }
+
+    /// Write the default settings and restart so every part of the app starts from them.
+    /// Nothing may save over the file on the way out (`resetting`).
+    fn reset_settings(&mut self, ctx: &egui::Context) {
+        self.s = settings::Settings::default();
+        let path = self.dir.join("data").join("settings.json");
+        if let Err(e) = settings::save(&path, &self.s) {
+            self.log(&format!("Could not reset settings: {e}"), Tag::Error);
+            return;
+        }
+        self.resetting = true;
+        crate::update::request_restart();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
     /// The open dialog, if any, as a modal over the main window (or the wizard).
     fn draw_dialog(&mut self, ctx: &egui::Context, screen: Rect) {
         if let Some(mut d) = self.dialog.take() {
@@ -826,6 +849,7 @@ impl App {
                         crate::update::request_restart();
                         ctx.send_viewport_cmd(egui::ViewportCommand::Close);
                     }
+                    DialogKind::ResetSettings => self.reset_settings(ctx),
                     _ => {}
                 },
                 dialogs::Outcome::StillHere => {
@@ -1034,7 +1058,7 @@ impl App {
     }
 
     pub fn save_settings(&mut self) {
-        if self.unsaved {
+        if self.unsaved || self.resetting {
             return; // first run: settings.json is written when the wizard finishes
         }
         if let Err(e) = settings::save(&self.dir.join("data").join("settings.json"), &self.s) {
@@ -3835,6 +3859,7 @@ impl App {
                         "logging" => (Tab::Logging, Page::Main),
                         "connect" => (Tab::Connect, Page::Main),
                         "appearance" => (Tab::Appearance, Page::Main),
+                        "reset" => (Tab::Reset, Page::Main),
                         "about" => (Tab::About, Page::Main),
                         "wsjtx" => (Tab::Connect, Page::Wsjtx),
                         "pota" => (Tab::Connect, Page::Pota),
