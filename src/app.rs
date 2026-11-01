@@ -1886,6 +1886,12 @@ impl App {
             let dim = !worked.is_empty();
             let park_col = if dim { 5 } else { 4 };
             let (suffix, lead) = self.hunt_badges(s, counts.as_deref());
+            // the "(n)" after the call, as a line above the link hint
+            let call_tip = match counts.as_deref().map(|c| c.activator(&s.activator, &base_call(&s.activator))) {
+                Some(0) => format!("You have never worked {}\n\nClick to open on pota.app", s.activator),
+                Some(n) => format!("You've worked {} {n} time{}\n\nClick to open on pota.app", s.activator, if n != 1 { "s" } else { "" }),
+                None => "Click to open on pota.app".to_string(), // counts not loaded yet
+            };
             tags.park = match lead.as_ref().map(|l| l.text.as_str()) {
                 Some("ATNO") => ParkKind::Atno,
                 Some("NEW") => ParkKind::New,
@@ -1896,7 +1902,7 @@ impl App {
             let mut cells = vec![
                 Cell { text: ago(&s.spot_time, now), stale: age_minutes(&s.spot_time, now).unwrap_or(0) > STALE_MINUTES, ..Default::default() },
                 Cell::text(self.heard_text(&s.activator)),
-                Cell { text: s.activator.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&s.activator))), link_tip: Some("Click to open on pota.app".into()), suffix, ..Default::default() },
+                Cell { text: s.activator.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&s.activator))), link_tip: Some(call_tip), suffix, ..Default::default() },
                 Cell::text(format!("{:.1}", s.frequency_khz)),
             ];
             if dim {
@@ -1913,7 +1919,7 @@ impl App {
                 park.link_tip = Some(if s.location.is_empty() {
                     "Click to open on pota.app".to_string()
                 } else {
-                    format!("{}\nClick to open on pota.app", crate::programs::location_tip(&s.location))
+                    format!("{}\n\nClick to open on pota.app", crate::programs::location_tip(&s.location))
                 });
             }
             park.lead = lead;
@@ -1987,7 +1993,7 @@ impl App {
                 park_cell.link = Some(format!("https://pota.app/park/{}", e.ref_));
                 let location = self.h.spots.as_ref().and_then(|t| t.all().find(|s| s.reference == e.ref_ && !s.location.is_empty()).map(|s| s.location.clone()));
                 park_cell.link_tip = Some(match location {
-                    Some(l) => format!("{}\nClick to open on pota.app", crate::programs::location_tip(&l)),
+                    Some(l) => format!("{}\n\nClick to open on pota.app", crate::programs::location_tip(&l)),
                     None => "Click to open on pota.app".to_string(),
                 });
             }
