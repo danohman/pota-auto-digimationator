@@ -538,6 +538,30 @@ fn callers_are_only_logged_when_the_mode_is_off() {
 }
 
 #[test]
+fn callers_are_answered_by_auto_hunt_when_the_setting_is_on() {
+    let mut s = T::new();
+    s.cq_setup();
+    s.h.cq_enabled = false;
+    s.h.answer_callers = true;
+    s.h.enabled = true;
+    s.cycle(&[dec("WD4DAN K1ABC FN42")]);
+    assert_eq!(s.replies(), ["WD4DAN K1ABC FN42"]);
+    assert_eq!(s.target_call().as_deref(), Some("K1ABC"));
+}
+
+#[test]
+fn callers_are_only_logged_when_auto_hunt_is_disabled() {
+    let mut s = T::new();
+    s.cq_setup();
+    s.h.cq_enabled = false;
+    s.h.answer_callers = true;
+    s.h.enabled = false;
+    s.cycle(&[dec("WD4DAN K1ABC FN42")]);
+    assert_eq!(s.n_replies(), 0);
+    assert_eq!(s.labels(), ["Answer"]);
+}
+
+#[test]
 fn auto_hunt_has_priority_over_cq_and_callers() {
     let mut s = T::new();
     s.cq_setup();

@@ -561,6 +561,8 @@ impl Wizard {
                        "When on, a station is called only if its park is new to you, according to your pota.app hunt counts. This needs your pota.app login (a later page); without it nothing is called while this is on. Off calls every spotted activator you have not worked today.");
                 switch(l, "Call stations after their 73", "Also reply to a sign-off", &mut app.s.pounce_signoffs,
                        "When an activator ends one QSO with 73 or RR73, the program can call them right away, which is often the quickest way in during a pile-up. It needs WSJT-X to show every decode, not only CQs (see the WSJT-X page). Turn it off if you keep WSJT-X's CQ only filter on.");
+                switch(l, "Answer stations that call me", "POTA or not, while Auto-Hunt is on", &mut app.s.answer_callers,
+                       "When on, a station that calls you is answered automatically while Auto-Hunt is enabled, whether or not it is a POTA activator. Stations you already worked on this band and mode today, skipped stations and anyone calling while you are in a QSO are not answered. Off lists such callers with an Answer button instead.");
                 l.section("Transmit frequency");
                 switch(l, "Move Tx to their frequency", "Off: only your receive frequency moves", &mut app.s.move_tx,
                        "Off (recommended): when the program calls a station, only WSJT-X's receive frequency moves to theirs and your transmit frequency stays where you put it. On: your transmit frequency is moved onto the station's as well. Auto CQ/Answer never moves your transmit frequency, whatever you choose here.");
@@ -768,7 +770,7 @@ impl Wizard {
                     ("Dry run", on(s.dry_run).to_string()),
                     ("Give up after", give),
                     ("Skip weaker than", snr),
-                    ("Hunting", format!("new parks only {}, after 73 {}, move Tx {}", on(s.new_parks_only), on(s.pounce_signoffs), on(s.move_tx))),
+                    ("Hunting", format!("new parks only {}, after 73 {}, answer callers {}, move Tx {}", on(s.new_parks_only), on(s.pounce_signoffs), on(s.answer_callers), on(s.move_tx))),
                     ("Auto CQ message", s.cq_text.clone()),
                     ("pota.app", if s.pota_user.is_empty() { "no login".to_string() } else { format!("{}, respot {}", s.pota_user, on(s.respot)) }),
                     ("Logging", {

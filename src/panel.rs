@@ -924,6 +924,9 @@ impl Panel {
         let mut v = app.s.pounce_signoffs;
         l.switch_row("Call stations after their 73", "Needs WSJT-X to show every decode, not just CQs", &mut v, true, 0.0);
         app.s.pounce_signoffs = v;
+        let mut v = app.s.answer_callers;
+        l.switch_row("Answer stations that call me", "POTA or not, while Auto-Hunt is enabled", &mut v, true, 0.0);
+        app.s.answer_callers = v;
         let mut v = app.s.move_tx;
         l.switch_row("Move Tx to their frequency", "Off: only Rx moves, Tx stays where you put it", &mut v, true, 0.0);
         app.s.move_tx = v;

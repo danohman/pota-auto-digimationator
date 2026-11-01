@@ -43,6 +43,7 @@ The same instructions are in the app under **Settings > Connections > WSJT-X set
 - **Auto Seq** on.
 - **Hold Tx Freq** ticked if you want Tx to stay where you put it (see [Move Tx](#move-tx)).
 - In WSJT-X Improved, untick **CQ only** and **Hide FT8 dupes** in the Band Activity window. WSJT-X only acts on a call to a line it is showing, so a hidden line is ignored. If you keep CQ only on, switch off **Settings > Hunting > Call stations after their 73**.
+- **Settings > Hunting > Answer stations that call me** (off by default): while Auto-Hunt is enabled, the program also answers any station that calls you, POTA or not, unless you already worked them today on that band and mode. A station worth hunting is still called first.
 
 ### 2. Run the program
 

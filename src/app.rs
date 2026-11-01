@@ -521,6 +521,7 @@ impl App {
         h.auto_log = s.auto_log;
         h.pounce_signoffs = s.pounce_signoffs;
         h.new_parks_only = s.new_parks_only;
+        h.answer_callers = s.answer_callers;
         h.default_attempts = s.max_attempts;
         h.attempts_by_mode = s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), *v)).collect();
         h.min_snr = s.min_snr;
@@ -1013,6 +1014,7 @@ impl App {
         }
         let h = &mut self.h;
         h.new_parks_only = self.s.new_parks_only;
+        h.answer_callers = self.s.answer_callers;
         h.cq_text = self.s.cq_text.clone();
         h.attempts_by_mode = self.s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), (*v).max(1))).collect();
         h.min_snr = self.s.min_snr;

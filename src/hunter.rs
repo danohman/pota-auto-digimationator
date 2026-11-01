@@ -443,6 +443,8 @@ pub struct Hunter {
     pub auto_log: bool,
     /// auto-hunt only parks pota.app says we never hunted (NEW)
     pub new_parks_only: bool,
+    /// answer stations that call us while Auto-Hunt is enabled, without Auto CQ/Answer
+    pub answer_callers: bool,
     /// "JA 20m FT8" keys (pota_spots::hide_key): programs hidden on that band and mode, hunting included
     pub hidden_programs: HashSet<String>,
     /// also call a station that has just sent 73/RR73 to someone
@@ -541,6 +543,7 @@ impl Hunter {
             min_snr: Some(-20),
             auto_log: true,
             new_parks_only: false,
+            answer_callers: false,
             hidden_programs: HashSet::new(),
             pounce_signoffs: true,
             awaiting_log: None,
@@ -1344,7 +1347,7 @@ impl Hunter {
                 let so = sign_off(&d.message);
                 if !so.is_empty() {
                     self.log(format!("{} sent you {so}", p.call), Tag::Skip);
-                } else if self.cq_enabled {
+                } else if self.cq_enabled || (self.enabled && self.answer_callers) {
                     let now = self.now();
                     self.callers.push((d.clone(), call.clone(), now)); // chosen when the cycle settles
                 } else {
@@ -1939,7 +1942,8 @@ impl Hunter {
                 self.log_with(format!("DRY RUN: would answer {call}  [{label}]"), Tag::Call, b, false);
                 return;
             }
-            self.answer_caller(&d, &call, received, "Auto CQ/Answer");
+            let how = if self.cq_enabled { "Auto CQ/Answer" } else { "Auto-Hunt" };
+            self.answer_caller(&d, &call, received, how);
             return;
         }
     }
