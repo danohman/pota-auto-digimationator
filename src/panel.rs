@@ -21,6 +21,15 @@ pub const CQ_CHOICES: [&str; 3] = ["CQ", "CQ POTA", "CQ DX"];
 pub const WIDTH: f32 = 440.0;
 /// first year of the copyright notice on the About tab
 const FIRST_YEAR: i32 = 2026;
+
+/// A switch row's description follows the switch: `on` while it is on, `off` while it is off.
+fn onoff(v: bool, on: &'static str, off: &'static str) -> &'static str {
+    if v {
+        on
+    } else {
+        off
+    }
+}
 const GPL_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
 
 /// Text styles of the About tab's selectable lines.
@@ -772,7 +781,7 @@ impl Panel {
         self.about_text(l, &format!("Version {}", env!("CARGO_PKG_VERSION")), AFont::SmallMuted, wrap, 0.0, 0.0, None);
         l.section("Updates");
         let mut v = app.s.update_check;
-        l.switch_row("Check for updates", "Looks at GitHub's latest release every few hours and offers it in Current Info", &mut v, true, 0.0);
+        l.switch_row("Check for updates", onoff(v, "Looks at GitHub's latest release every few hours and offers it in Current Info", "Never looks for a new release"), &mut v, true, 0.0);
         app.s.update_check = v;
         let btn = l.small_button("Check now");
         let bsz = btn.size(l.ui);
@@ -915,7 +924,7 @@ impl Panel {
     fn hunting_tab(&mut self, app: &mut App, l: &mut L) {
         l.section("Hunting");
         let mut dry = app.s.dry_run;
-        l.switch_row("Dry run", "Log what it would call, never transmit", &mut dry, true, 0.0);
+        l.switch_row("Dry run", onoff(dry, "Logs what it would call, never transmits", "Transmits: calls stations for real"), &mut dry, true, 0.0);
         app.s.dry_run = dry;
         for mode in ATTEMPT_MODES {
             let cur = app.s.attempts_by_mode.get(mode).copied().unwrap_or(app.s.max_attempts);
@@ -934,16 +943,16 @@ impl Panel {
             l.act.push(Do::Changed);
         }
         let mut v = app.s.new_parks_only;
-        l.switch_row("Only hunt new parks", "Skip parks you've hunted before (needs your pota.app login)", &mut v, true, 0.0);
+        l.switch_row("Only hunt new parks", onoff(v, "Only calls parks you've never hunted (needs your pota.app login)", "Calls every activator you haven't worked today"), &mut v, true, 0.0);
         app.s.new_parks_only = v;
         let mut v = app.s.pounce_signoffs;
-        l.switch_row("Call stations after their 73", "Needs WSJT-X to show every decode, not just CQs", &mut v, true, 0.0);
+        l.switch_row("Call stations after their 73", onoff(v, "Calls an activator right after their 73 (needs WSJT-X to show every decode, not just CQs)", "Waits for the activator's next CQ"), &mut v, true, 0.0);
         app.s.pounce_signoffs = v;
         let mut v = app.s.answer_callers;
-        l.switch_row("Answer stations that call me", "POTA or not, while Auto-Hunt is enabled", &mut v, true, 0.0);
+        l.switch_row("Answer stations that call me", onoff(v, "Answers them automatically, POTA or not, while Auto-Hunt is enabled", "Lists them with an Answer button instead"), &mut v, true, 0.0);
         app.s.answer_callers = v;
         let mut v = app.s.move_tx;
-        l.switch_row("Move Tx to their frequency", "Off: only Rx moves, Tx stays where you put it", &mut v, true, 0.0);
+        l.switch_row("Move Tx to their frequency", onoff(v, "Tx and Rx will move to their frequency", "Only Rx moves, Tx stays where you put it"), &mut v, true, 0.0);
         app.s.move_tx = v;
 
         l.section("Auto CQ/Answer");
@@ -1094,7 +1103,7 @@ impl Panel {
         }
         l.section("Radio receive (via the COM port)");
         let mut v = app.s.rig_clean;
-        l.switch_row("Keep ATT, NB and NR off", "Sent at start-up and after each band or mode change", &mut v, true, 0.0);
+        l.switch_row("Keep ATT, NB and NR off", onoff(v, "Sent at start-up and after each band or mode change", "Leaves the radio's ATT, NB and NR alone"), &mut v, true, 0.0);
         app.s.rig_clean = v;
         l.section("Radio Tx power (via the COM port)");
         let (vals, labels) = stepper_labels_power();
@@ -1106,7 +1115,7 @@ impl Panel {
         }
         l.section("Restore");
         let mut v = app.s.rig_restore;
-        l.switch_row("Restore the radio's settings", "Put back as they were before each QSY and on close", &mut v, true, 0.0);
+        l.switch_row("Restore the radio's settings", onoff(v, "Put back as they were before each QSY and on close", "Left as the program set them"), &mut v, true, 0.0);
         app.s.rig_restore = v;
         let (w, small, muted) = (l.right - l.left, l.f.small.clone(), l.p.muted);
         l.paragraph("When enabled, NB, NR, ATT and Tx power are restored to the settings the radio had before the program changed them, before the program QSYs to another band and when it closes.", &small, muted, w, 0.0, 8.0);
@@ -1120,7 +1129,7 @@ impl Panel {
         l.section("pota.app");
         l.nav_row("pota.app account", &app.pota_summary(), Page::Pota);
         let mut v = app.s.respot;
-        l.switch_row("Respot to pota.app after each QSO", "Posts the activator's spot after a logged QSO (needs the login above and a known park)", &mut v, true, 0.0);
+        l.switch_row("Respot to pota.app after each QSO", onoff(v, "Posts the activator's spot after a logged QSO (needs the login above and a known park)", "Never posts a spot"), &mut v, true, 0.0);
         app.s.respot = v;
         let msg = &app.s.respot_message;
         l.nav_row("Respot message", if msg.is_empty() { "None" } else { msg }, Page::Respot);
@@ -1157,16 +1166,16 @@ impl Panel {
         let (p, f) = (l.p, l.f);
         l.section("WSJT-X");
         let mut v = app.s.auto_log;
-        l.switch_row("Press OK on WSJT-X's Log QSO window", "Whenever it opens, for any QSO", &mut v, true, 0.0);
+        l.switch_row("Press OK on WSJT-X's Log QSO window", onoff(v, "Clicks OK whenever it opens, for any QSO", "You click OK yourself"), &mut v, true, 0.0);
         app.s.auto_log = v;
         let mut v = app.s.ding;
-        l.switch_row("Play a sound when a QSO is logged", "Plays when WSJT-X logs any QSO", &mut v, true, 0.0);
+        l.switch_row("Play a sound when a QSO is logged", onoff(v, "Plays when WSJT-X logs any QSO", "Silent when a QSO is logged"), &mut v, true, 0.0);
         app.s.ding = v;
         let custom = app.s.ding_path.clone();
         Self::sound_file_row(l, p, Kind::Ding, &custom);
 
         let mut v = app.s.pop;
-        l.switch_row("Play a sound for a wanted park", "Plays when a wanted park is ready to call (only NEW/ATNO parks when hunting new parks only)", &mut v, true, 0.0);
+        l.switch_row("Play a sound for a wanted park", onoff(v, "Plays when a wanted park is ready to call (only NEW/ATNO parks when hunting new parks only)", "Silent when a wanted park is ready"), &mut v, true, 0.0);
         app.s.pop = v;
         let custom = app.s.pop_path.clone();
         Self::sound_file_row(l, p, Kind::Pop, &custom);
@@ -1218,7 +1227,7 @@ impl Panel {
         }
         let i = *sel;
         let mut on = enabled(app, i);
-        l.switch_row(&format!("Log each QSO to {}", name(i)), "Off by default", &mut on, true, 0.0);
+        l.switch_row(&format!("Log each QSO to {}", name(i)), onoff(on, "Each logged QSO is also sent here", "Off by default"), &mut on, true, 0.0);
         let (mut h, mut port) = bufs[i].clone();
         l.form(&mut [("Host", &mut h, 24.0, false), ("Port", &mut port, 8.0, false)], 6.0, false);
         bufs[i] = (h.clone(), port.clone());

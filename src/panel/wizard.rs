@@ -533,7 +533,7 @@ impl Wizard {
             Step::Safety => {
                 lead(l, "These settings limit what the program does on its own. The defaults are a good start.");
                 l.section("Dry run");
-                switch(l, "Dry run", "Show what it would call, never transmit", &mut app.s.dry_run,
+                switch(l, "Dry run", super::onoff(app.s.dry_run, "Shows what it would call, never transmits", "Transmits: calls stations for real"), &mut app.s.dry_run,
                        "While this is on the program does everything except transmit: it lists the stations it would call (\"DRY RUN\" lines) and what it would respot. It applies to Auto-Hunt and to Auto CQ/Answer. Keep it on for your first sessions to see how the program behaves, then switch it off in Settings > Hunting.");
                 l.section("Give up after");
                 for mode in ATTEMPT_MODES {
@@ -557,14 +557,14 @@ impl Wizard {
             Step::Hunting => {
                 lead(l, "These choices decide which stations Auto-Hunt calls and how it calls them.");
                 l.section("Which stations");
-                switch(l, "Only hunt new parks", "Skip parks you have hunted before", &mut app.s.new_parks_only,
+                switch(l, "Only hunt new parks", super::onoff(app.s.new_parks_only, "Only calls parks you have never hunted", "Calls every activator you have not worked today"), &mut app.s.new_parks_only,
                        "When on, a station is called only if its park is new to you, according to your pota.app hunt counts. This needs your pota.app login (a later page); without it nothing is called while this is on. Off calls every spotted activator you have not worked today.");
-                switch(l, "Call stations after their 73", "Also reply to a sign-off", &mut app.s.pounce_signoffs,
+                switch(l, "Call stations after their 73", super::onoff(app.s.pounce_signoffs, "Calls an activator right after their 73", "Waits for the activator's next CQ"), &mut app.s.pounce_signoffs,
                        "When an activator ends one QSO with 73 or RR73, the program can call them right away, which is often the quickest way in during a pile-up. It needs WSJT-X to show every decode, not only CQs (see the WSJT-X page). Turn it off if you keep WSJT-X's CQ only filter on.");
-                switch(l, "Answer stations that call me", "POTA or not, while Auto-Hunt is on", &mut app.s.answer_callers,
+                switch(l, "Answer stations that call me", super::onoff(app.s.answer_callers, "Answers them automatically, POTA or not, while Auto-Hunt is on", "Lists them with an Answer button instead"), &mut app.s.answer_callers,
                        "When on, a station that calls you is answered automatically while Auto-Hunt is enabled, whether or not it is a POTA activator. Stations you already worked on this band and mode today, skipped stations and anyone calling while you are in a QSO are not answered. Off lists such callers with an Answer button instead.");
                 l.section("Transmit frequency");
-                switch(l, "Move Tx to their frequency", "Off: only your receive frequency moves", &mut app.s.move_tx,
+                switch(l, "Move Tx to their frequency", super::onoff(app.s.move_tx, "Tx and Rx will move to their frequency", "Only Rx moves, Tx stays where you put it"), &mut app.s.move_tx,
                        "Off (recommended): when the program calls a station, only WSJT-X's receive frequency moves to theirs and your transmit frequency stays where you put it. On: your transmit frequency is moved onto the station's as well. Auto CQ/Answer never moves your transmit frequency, whatever you choose here.");
             }
             Step::Cq => {
@@ -587,7 +587,7 @@ impl Wizard {
                 Panel::check_creds_row(l, app);
                 help(l, "The username or email you sign in with at pota.app. Leave both blank to skip. The password is saved as plain text in settings.json on this computer, so use it only on a computer you trust. It is sent only to pota.app, to read your hunt counts.");
                 l.section("Respot");
-                switch(l, "Respot after each QSO", "Post the activator's spot after a logged QSO", &mut app.s.respot,
+                switch(l, "Respot after each QSO", super::onoff(app.s.respot, "Posts the activator's spot after a logged QSO", "Never posts a spot"), &mut app.s.respot,
                        "After a QSO is logged, the program posts a spot for the activator to pota.app with the frequency and mode, so other hunters can find them. It needs the login above and a confirmed park, and in Dry run it only says what it would have posted.");
                 let mut m = self.msg.clone();
                 l.form(&mut [("Comment", &mut m, 26.0, false)], 6.0, false);
@@ -598,7 +598,7 @@ impl Wizard {
             Step::Logging => {
                 lead(l, "WSJT-X keeps its own log. These settings control how the contacts are accepted and whether they are also sent to another logger.");
                 l.section("WSJT-X's Log QSO window");
-                switch(l, "Press OK for me", "Whenever the Log QSO window opens", &mut app.s.auto_log,
+                switch(l, "Press OK for me", super::onoff(app.s.auto_log, "Clicks OK whenever the Log QSO window opens", "You click OK yourself"), &mut app.s.auto_log,
                        "WSJT-X records a QSO (and tells this program about it) only after you click OK in its Log QSO window. With this on, the program clicks OK for you a moment after the window opens, for any QSO, so contacts are never left unlogged. Turn it off if you want to check each QSO yourself.");
                 l.section("Also log each QSO to");
                 Panel::logger_picker(l, app, &mut self.dd, &mut self.lg_sel, &mut self.lg_bufs);
@@ -606,12 +606,12 @@ impl Wizard {
             Step::Sounds => {
                 lead(l, "Two short sounds tell you what is happening while you are looking at another window. Each can be switched off or replaced with your own file (mp3, wav, wma or m4a).");
                 l.section("QSO logged");
-                switch(l, "Play a sound when a QSO is logged", "Any QSO WSJT-X logs", &mut app.s.ding,
+                switch(l, "Play a sound when a QSO is logged", super::onoff(app.s.ding, "Plays for any QSO WSJT-X logs", "Silent when a QSO is logged"), &mut app.s.ding,
                        "A ding plays whenever WSJT-X logs a contact, whether the program started it or you did. Test plays the current sound, Choose picks your own file, Reset goes back to the built-in one.");
                 let custom = app.s.ding_path.clone();
                 Panel::sound_file_row(l, p, Kind::Ding, &custom);
                 l.section("Wanted park");
-                switch(l, "Play a sound for a wanted park", "A candidate is ready to call", &mut app.s.pop,
+                switch(l, "Play a sound for a wanted park", super::onoff(app.s.pop, "Plays when a candidate is ready to call", "Silent when a candidate is ready"), &mut app.s.pop,
                        "A pop plays when the program has a station it is ready to call. With \"Only hunt new parks\" on, it plays only for parks that are new to you, so it works as an alert for the ones you want. It plays whether or not Auto-Hunt is on.");
                 let custom = app.s.pop_path.clone();
                 Panel::sound_file_row(l, p, Kind::Pop, &custom);
@@ -734,7 +734,7 @@ impl Wizard {
             Step::Radio => {
                 lead(l, "These settings go to the radio chosen on the previous page: the program sends the CAT commands straight to its COM port and reads them back to confirm. Until a port is chosen nothing is sent. If you have no CAT-controlled radio, switch the first one off and leave the power settings on Leave.");
                 l.section("Receiver");
-                switch(l, "Keep ATT, NB and NR off", "Sent at start-up and after each band change", &mut app.s.rig_clean,
+                switch(l, "Keep ATT, NB and NR off", super::onoff(app.s.rig_clean, "Sent at start-up and after each band change", "Leaves the radio's ATT, NB and NR alone"), &mut app.s.rig_clean,
                        "Attenuator, noise blanker and noise reduction hurt weak-signal digital decoding, and the radio may remember them for each band. When on, the program turns all three off for the main receiver two seconds after it starts and again after every band or mode change.");
                 l.section("Transmit power");
                 let (vals, labels) = stepper_labels_power();
@@ -745,7 +745,7 @@ impl Wizard {
                 }
                 help(l, "Digital modes should run at modest power, and a hunter does not need much. The power is set when the program starts and after each band or mode change. Leave sends nothing.");
                 l.section("Restore");
-                switch(l, "Restore the radio's settings", "Put back as they were before each QSY and on close", &mut app.s.rig_restore,
+                switch(l, "Restore the radio's settings", super::onoff(app.s.rig_restore, "Put back as they were before each QSY and on close", "Left as the program set them"), &mut app.s.rig_restore,
                        "When on, NB, NR, ATT and Tx power are restored to the settings the radio had before the program changed them: before the program QSYs to another band and when it closes.");
             }
             Step::Review => {
