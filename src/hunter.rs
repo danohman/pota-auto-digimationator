@@ -1726,13 +1726,14 @@ impl Hunter {
         t.completed = true;
         t.answered = true;
         t.heard = true;
-        let mut entry = WorkedEntry::new(&t.call, &t.band, &t.mode, Some((self.utcnow)()), &t.ref_, &t.park);
+        let sent = sent_call(&t.call, t.decode.as_ref());
+        let mut entry = WorkedEntry::new(&sent, &t.band, &t.mode, Some((self.utcnow)()), &t.ref_, &t.park);
         entry.logged = false;
         if self.add_worked(entry).1 {
             self.worked_did_change();
         }
         let at = if t.ref_.is_empty() { " (park unknown)".to_string() } else { format!(" at {}", t.ref_) };
-        self.log(format!("QSO complete with {} on {} {}{at}", t.call, t.band, t.mode), Tag::Worked);
+        self.log(format!("QSO complete with {sent} on {} {}{at}", t.band, t.mode), Tag::Worked);
         self.awaiting_log = Some(AwaitingLog { call: t.call.clone(), deadline: self.now() + Self::LOG_WAIT_SECONDS });
     }
 
@@ -1813,6 +1814,9 @@ impl Hunter {
         };
         self.worked[i].logged = true;
         self.worked[i].time = Some(when);
+        if !q.dx_call.is_empty() {
+            self.worked[i].call = q.dx_call.to_uppercase(); // as WSJT-X logged it (/P and all)
+        }
         let entry = self.worked[i].clone();
         self.gave_up.remove(&call);
         if self.awaiting_log.as_ref().is_some_and(|a| a.call == call) {
