@@ -94,6 +94,14 @@ pub fn shown(message: &str) -> String {
     message.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
+/// The callsign as the station sent it in `d` ("3Z9VI/P"), for log lines; `call` (the
+/// core call we track it by) when the message doesn't carry it.
+pub fn sent_call(call: &str, d: Option<&Decode>) -> String {
+    d.and_then(|d| parse_message(&d.message))
+        .filter(|p| base_call(&p.call) == base_call(call))
+        .map_or_else(|| call.to_string(), |p| p.call)
+}
+
 pub fn looks_like_call(tok: &str) -> bool {
     if tok.is_empty() || tok.starts_with('<') || grid_re().is_match(tok) {
         return false;
@@ -1195,7 +1203,7 @@ impl Hunter {
         let max = self.max_attempts();
         if st.transmitting && !prev.as_ref().is_some_and(|p| p.transmitting) {
             if waiting && t.attempts >= max {
-                self.log(format!("No answer from {} after {} calls; halting Tx", t.call, t.attempts), Tag::Skip);
+                self.log(format!("No answer from {} after {} calls; halting Tx", sent_call(&t.call, t.decode.as_ref()), t.attempts), Tag::Skip);
                 let until = self.now() + Self::COOLOFF_SECONDS;
                 self.cooloff.insert(t.call.clone(), until);
                 self.gave_up.insert(t.call.clone(), until);
@@ -1219,7 +1227,7 @@ impl Hunter {
                         active: Some(Active::QsoRunning(t.call.clone())),
                     });
                 }
-                self.log_with(format!("{verb} {} ({}/{max})", t.call, t.attempts), Tag::Call, buttons, false);
+                self.log_with(format!("{verb} {} ({}/{max})", sent_call(&t.call, t.decode.as_ref()), t.attempts), Tag::Call, buttons, false);
             }
         }
         if !st.tx_enabled && !st.transmitting {
@@ -1258,9 +1266,9 @@ impl Hunter {
                 if t.idle_since == 0.0 {
                     t.idle_since = now;
                     let s = if t.attempts != 1 { "s" } else { "" };
-                    self.log(format!("Called {} {} time{s}; waiting for an answer", t.call, t.attempts), Tag::Info);
+                    self.log(format!("Called {} {} time{s}; waiting for an answer", sent_call(&t.call, t.decode.as_ref()), t.attempts), Tag::Info);
                 } else if now - t.idle_since > Self::SIGNOFF_WAIT {
-                    self.log(format!("No answer from {} after {} calls", t.call, t.attempts), Tag::Skip);
+                    self.log(format!("No answer from {} after {} calls", sent_call(&t.call, t.decode.as_ref()), t.attempts), Tag::Skip);
                     self.gave_up.insert(t.call.clone(), now + Self::COOLOFF_SECONDS);
                     self.cooloff.insert(t.call.clone(), self.now() + Self::COOLOFF_SECONDS);
                     self.target_ = Some(t);
@@ -1596,7 +1604,7 @@ impl Hunter {
         t.signoff = !sign_off(&d.message).is_empty();
         t.manual = true;
         self.set_target(Some(t));
-        self.log_with(format!("CALLING {call}  ({:+} dB at {} Hz)", d.snr, d.df), Tag::Call,
+        self.log_with(format!("CALLING {}  ({:+} dB at {} Hz)", sent_call(call, Some(&d)), d.snr, d.df), Tag::Call,
                       Self::qso_buttons(call, &cand.ref_, true), false);
     }
 
@@ -1639,7 +1647,7 @@ impl Hunter {
             t.signoff = signoff;
             self.set_target(Some(t));
         }
-        self.log_with(format!("CALLING {call} again: sent {again} again  [{label}]"), Tag::Call,
+        self.log_with(format!("CALLING {} again: sent {again} again  [{label}]", sent_call(call, Some(d))), Tag::Call,
                       Self::qso_buttons(call, ref_, true), false);
     }
 
@@ -1876,7 +1884,7 @@ impl Hunter {
         let best = best.clone();
         let why = best.reason.trim_start_matches([',', ' ']);
         let why = if why.is_empty() { String::new() } else { format!(", {why}") };
-        let label = format!("{}  ({:+} dB at {} Hz{why})", best.call, best.decode.snr, best.decode.df);
+        let label = format!("{}  ({:+} dB at {} Hz{why})", sent_call(&best.call, Some(&best.decode)), best.decode.snr, best.decode.df);
         if self.busy() {
             self.log(format!("Busy (in QSO); not calling {}", best.call), Tag::Skip);
             return false;
