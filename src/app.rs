@@ -327,7 +327,7 @@ pub struct App {
     notice_seen: HashMap<(String, String), String>,
     notice_pulse: HashMap<(String, String), f64>,
     /// (base call, band) -> `now()` of the last decode sent by that station
-    last_heard: HashMap<(String, String), (f64, u32)>,
+    last_heard: HashMap<(String, String), (f64, u32, i32)>,
     /// last band WSJT-X reported; kept while the dial is between bands (mid-retune)
     heard_band: std::cell::Cell<Option<&'static str>>,
     decode_until: f64,
@@ -539,6 +539,7 @@ impl App {
                  Col::new("heard", "Heard", "99m").tip("Age of the most recent WSJT-X decode"),
                  Col::new("call", "Call", "AE4XO/P (999)").tip("Callsign of the activator"),
                  Col::new("hz", "Hz", "9999").tip("Audio frequency (Hz) of the most recent WSJT-X decode"),
+                 Col::new("db", "dB", "-99").tip("Signal report (dB) of the most recent WSJT-X decode"),
                  Col::new("freq", "FREQ", "28074.0").tip("Frequency of the activator")]
         };
         let park_col = || Col::new("park", "Park", PARK_SAMPLE).tip("Park reference and name of the activator");
@@ -1421,7 +1422,7 @@ impl App {
         if call == self.h.my_call() {
             return;
         }
-        self.last_heard.insert((call, band.to_string()), (self.now(), d.df));
+        self.last_heard.insert((call, band.to_string()), (self.now(), d.df, d.snr));
         self.refresh_heard_cells();
     }
 
@@ -1437,7 +1438,7 @@ impl App {
     fn heard_key(&self, call: &str) -> SortKey {
         let Some(band) = self.heard_band() else { return SortKey::None };
         match self.last_heard.get(&(base_call(call), band.to_string())) {
-            Some((t, _)) => SortKey::Num((self.now() - t).max(0.0).floor()),
+            Some((t, _, _)) => SortKey::Num((self.now() - t).max(0.0).floor()),
             None => SortKey::None,
         }
     }
@@ -1445,14 +1446,29 @@ impl App {
     /// Audio offset (Hz) of the last decode from `call` on this band, "-" if never heard.
     fn hz_text(&self, call: &str) -> String {
         match self.heard_band().and_then(|b| self.last_heard.get(&(base_call(call), b.to_string()))) {
-            Some((_, hz)) => hz.to_string(),
+            Some((_, hz, _)) => hz.to_string(),
             None => "-".into(),
         }
     }
 
     fn hz_key(&self, call: &str) -> SortKey {
         match self.heard_band().and_then(|b| self.last_heard.get(&(base_call(call), b.to_string()))) {
-            Some((_, hz)) => SortKey::Num(*hz as f64),
+            Some((_, hz, _)) => SortKey::Num(*hz as f64),
+            None => SortKey::None,
+        }
+    }
+
+    /// SNR (dB) of the last decode from `call` on this band, "-" if never heard.
+    fn db_text(&self, call: &str) -> String {
+        match self.heard_band().and_then(|b| self.last_heard.get(&(base_call(call), b.to_string()))) {
+            Some((_, _, db)) => format!("{db:+}"),
+            None => "-".into(),
+        }
+    }
+
+    fn db_key(&self, call: &str) -> SortKey {
+        match self.heard_band().and_then(|b| self.last_heard.get(&(base_call(call), b.to_string()))) {
+            Some((_, _, db)) => SortKey::Num(*db as f64),
             None => SortKey::None,
         }
     }
@@ -1462,7 +1478,7 @@ impl App {
         let Some(band) = self.heard_band() else { return "-".into() };
         match self.last_heard.get(&(base_call(call), band.to_string())) {
             None => "-".into(),
-            Some((t, _)) => {
+            Some((t, _, _)) => {
                 let s = (self.now() - t).max(0.0) as u64;
                 if s < 60 { format!("{s}s") } else { format!("{}m", s / 60) }
             }
@@ -1479,20 +1495,24 @@ impl App {
             .iter()
             .map(|t| t.rows.iter().map(|r| r.data.as_ref().map_or(SortKey::None, |d| self.heard_key(&d.call))).collect())
             .collect();
-        let hz: Vec<Vec<(String, SortKey)>> = [&self.spots_tree, &self.done_tree]
+        let hz: Vec<Vec<[(String, SortKey); 2]>> = [&self.spots_tree, &self.done_tree]
             .iter()
-            .map(|t| t.rows.iter().map(|r| r.data.as_ref().map_or((String::new(), SortKey::None), |d| (self.hz_text(&d.call), self.hz_key(&d.call)))).collect())
+            .map(|t| t.rows.iter().map(|r| r.data.as_ref().map_or([(String::new(), SortKey::None), (String::new(), SortKey::None)], |d| {
+                [(self.hz_text(&d.call), self.hz_key(&d.call)), (self.db_text(&d.call), self.db_key(&d.call))]
+            })).collect())
             .collect();
         let mut changed = false;
         for (t, hz) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(hz) {
-            for (r, (text, key)) in t.rows.iter_mut().zip(hz) {
-                if let Some(k) = r.keys.get_mut(3) {
-                    *k = key;
-                }
-                if let Some(c) = r.cells.get_mut(3) {
-                    if c.text != text {
-                        c.text = text;
-                        changed = true;
+            for (r, vals) in t.rows.iter_mut().zip(hz) {
+                for (i, (text, key)) in vals.into_iter().enumerate() {
+                    if let Some(k) = r.keys.get_mut(3 + i) {
+                        *k = key;
+                    }
+                    if let Some(c) = r.cells.get_mut(3 + i) {
+                        if c.text != text {
+                            c.text = text;
+                            changed = true;
+                        }
                     }
                 }
             }
@@ -1511,7 +1531,7 @@ impl App {
             }
         }
         for t in [&mut self.spots_tree, &mut self.done_tree] {
-            if t.sort.0 == 1 || t.sort.0 == 3 {
+            if t.sort.0 == 1 || t.sort.0 == 3 || t.sort.0 == 4 {
                 t.sort_rows(); // sorted by Heard: keep the order current as the times tick
             }
         }
@@ -1917,7 +1937,7 @@ impl App {
                 tags.heard = true;
             }
             let dim = !worked.is_empty();
-            let park_col = if dim { 6 } else { 5 };
+            let park_col = if dim { 7 } else { 6 };
             let (suffix, lead) = self.hunt_badges(s, counts.as_deref());
             // the "(n)" after the call, as a line above the link hint
             let call_tip = match counts.as_deref().map(|c| c.activator(&s.activator, &base_call(&s.activator))) {
@@ -1937,6 +1957,7 @@ impl App {
                 Cell::text(self.heard_text(&s.activator)),
                 Cell { text: s.activator.clone(), link: Some(format!("https://pota.app/profile/{}", base_call(&s.activator))), link_tip: Some(call_tip), suffix, ..Default::default() },
                 Cell::text(self.hz_text(&s.activator)),
+                Cell::text(self.db_text(&s.activator)),
                 Cell::text(format!("{:.1}", s.frequency_khz)),
             ];
             if dim {
@@ -1965,6 +1986,7 @@ impl App {
                 self.heard_key(&s.activator),
                 SortKey::Text(s.activator.to_lowercase()),
                 self.hz_key(&s.activator),
+                self.db_key(&s.activator),
                 SortKey::Num(s.frequency_khz),
             ];
             if dim {
