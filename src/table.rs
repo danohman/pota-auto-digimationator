@@ -104,6 +104,8 @@ pub struct RowData {
     pub status: String,
     pub park: String,
     pub skipped: bool,
+    /// park position (latitude, longitude), for the DIR column
+    pub pos: Option<(f64, f64)>,
 }
 
 /// What a row is ordered by in one column (empty values always sort last).

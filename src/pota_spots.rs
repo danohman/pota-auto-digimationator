@@ -50,6 +50,8 @@ pub struct Spot {
     pub qualifying: Option<bool>,
     /// UTC, e.g. "2026-10-25T02:45:50"
     pub spot_time: String,
+    /// Park position (latitude, longitude): pota.app's `latitude`/`longitude`, else the center of `grid6`/`grid4`
+    pub pos: Option<(f64, f64)>,
 }
 
 impl Spot {
@@ -85,6 +87,17 @@ fn text(s: &Value, key: &str) -> String {
         Some(Value::Null) | None => String::new(),
         Some(v) => v.to_string(),
     }
+}
+
+/// Where the park is: the spot's `latitude`/`longitude`, else the center of its `grid6`/`grid4`.
+fn park_pos(s: &Value) -> Option<(f64, f64)> {
+    let num = |k: &str| s.get(k).and_then(Value::as_f64);
+    if let (Some(la), Some(lo)) = (num("latitude"), num("longitude")) {
+        if la.abs() <= 90.0 && lo.abs() <= 180.0 && (la != 0.0 || lo != 0.0) {
+            return Some((la, lo));
+        }
+    }
+    ["grid6", "grid4"].iter().find_map(|k| crate::geo::grid_center(&text(s, k)))
 }
 
 fn truthy(v: Option<&Value>) -> bool {
@@ -138,6 +151,7 @@ impl SpotTable {
                     _ => None,
                 },
                 spot_time: text(s, "spotTime"),
+                pos: park_pos(s),
             };
             let key = base_call(&call);
             match t.index.get(&key) {

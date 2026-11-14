@@ -11,6 +11,7 @@ mod comports;
 mod cycles;
 mod dialogs;
 mod events;
+mod geo;
 mod hunter;
 mod logdialog;
 mod logview;

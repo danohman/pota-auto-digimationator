@@ -540,7 +540,8 @@ impl App {
                  Col::new("call", "Call", "AE4XO/P (999)").tip("Callsign of the activator"),
                  Col::new("hz", "Hz", "9999").tip("Audio frequency (Hz) of the most recent WSJT-X decode"),
                  Col::new("db", "dB", "-99").tip("Signal report (dB) of the most recent WSJT-X decode"),
-                 Col::new("freq", "FREQ", "28074.0").tip("Frequency of the activator")]
+                 Col::new("freq", "FREQ", "28074.0").tip("Frequency of the activator"),
+                 Col::new("dir", "DIR", "359°").tip("Great-circle heading (degrees true) from your grid, as WSJT-X reports it, to the park")]
         };
         let park_col = || Col::new("park", "Park", PARK_SAMPLE).tip("Park reference and name of the activator");
         let mut spots_cols = spot_cols();
@@ -1451,6 +1452,20 @@ impl App {
         }
     }
 
+    /// Heading in whole degrees from the WSJT-X grid to a park, None until both are known.
+    fn dir_deg(&self, pos: Option<(f64, f64)>) -> Option<f64> {
+        let me = crate::geo::grid_center(&self.h.status.as_ref()?.de_grid)?;
+        Some(crate::geo::bearing(me, pos?).round() % 360.0)
+    }
+
+    fn dir_text(&self, pos: Option<(f64, f64)>) -> String {
+        self.dir_deg(pos).map_or("-".into(), |d| format!("{d:.0}°"))
+    }
+
+    fn dir_key(&self, pos: Option<(f64, f64)>) -> SortKey {
+        self.dir_deg(pos).map_or(SortKey::None, SortKey::Num)
+    }
+
     fn hz_key(&self, call: &str) -> SortKey {
         match self.heard_band().and_then(|b| self.last_heard.get(&(base_call(call), b.to_string()))) {
             Some((_, hz, _)) => SortKey::Num(*hz as f64),
@@ -1502,6 +1517,24 @@ impl App {
             })).collect())
             .collect();
         let mut changed = false;
+        // DIR follows the grid WSJT-X reports, which can arrive after the rows were built
+        let dirs: Vec<Vec<(String, SortKey)>> = [&self.spots_tree, &self.done_tree]
+            .iter()
+            .map(|t| t.rows.iter().map(|r| { let pos = r.data.as_ref().and_then(|d| d.pos); (self.dir_text(pos), self.dir_key(pos)) }).collect())
+            .collect();
+        for (t, dirs) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(dirs) {
+            for (r, (text, key)) in t.rows.iter_mut().zip(dirs) {
+                if let Some(k) = r.keys.get_mut(6) {
+                    *k = key;
+                }
+                if let Some(c) = r.cells.get_mut(6) {
+                    if c.text != text {
+                        c.text = text;
+                        changed = true;
+                    }
+                }
+            }
+        }
         for (t, hz) in [&mut self.spots_tree, &mut self.done_tree].into_iter().zip(hz) {
             for (r, vals) in t.rows.iter_mut().zip(hz) {
                 for (i, (text, key)) in vals.into_iter().enumerate() {
@@ -1531,7 +1564,7 @@ impl App {
             }
         }
         for t in [&mut self.spots_tree, &mut self.done_tree] {
-            if t.sort.0 == 1 || t.sort.0 == 3 || t.sort.0 == 4 {
+            if t.sort.0 == 1 || t.sort.0 == 3 || t.sort.0 == 4 || t.sort.0 == 6 {
                 t.sort_rows(); // sorted by Heard: keep the order current as the times tick
             }
         }
@@ -1937,7 +1970,7 @@ impl App {
                 tags.heard = true;
             }
             let dim = !worked.is_empty();
-            let park_col = if dim { 7 } else { 6 };
+            let park_col = if dim { 8 } else { 7 };
             let (suffix, lead) = self.hunt_badges(s, counts.as_deref());
             // the "(n)" after the call, as a line above the link hint
             let call_tip = match counts.as_deref().map(|c| c.activator(&s.activator, &base_call(&s.activator))) {
@@ -1959,6 +1992,7 @@ impl App {
                 Cell::text(self.hz_text(&s.activator)),
                 Cell::text(self.db_text(&s.activator)),
                 Cell::text(format!("{:.1}", s.frequency_khz)),
+                Cell::text(self.dir_text(s.pos)),
             ];
             if dim {
                 let (text, fill, tip) = if worked == "Worked" {
@@ -1980,7 +2014,7 @@ impl App {
             park.lead = lead;
             cells.push(park);
             debug_assert_eq!(cells.len() - 1, park_col);
-            let data = RowData { call: s.activator.clone(), ref_: s.reference.clone(), status: worked.to_string(), park: s.park_name.clone(), skipped };
+            let data = RowData { call: s.activator.clone(), ref_: s.reference.clone(), status: worked.to_string(), park: s.park_name.clone(), skipped, pos: s.pos };
             let mut keys = vec![
                 age_minutes(&s.spot_time, now).map_or(SortKey::None, |m| SortKey::Num(m as f64)),
                 self.heard_key(&s.activator),
@@ -1988,6 +2022,7 @@ impl App {
                 self.hz_key(&s.activator),
                 self.db_key(&s.activator),
                 SortKey::Num(s.frequency_khz),
+                self.dir_key(s.pos),
             ];
             if dim {
                 keys.push(SortKey::Text(worked.to_string()));
