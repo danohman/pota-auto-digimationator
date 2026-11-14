@@ -118,6 +118,9 @@ fn went_qrt(s: &Value) -> bool {
         .any(|k| text(s, k).to_uppercase().contains("QRT"))
 }
 
+/// Parks whose spots are dropped (test spots, not real activations).
+const IGNORED_PARKS: &[&str] = &["K-TEST"];
+
 impl SpotTable {
     pub fn new(raw: &[Value], fetched_at: f64) -> Self {
         let mut t = SpotTable { fetched_at, calls: Vec::new(), index: HashMap::new(), hidden: HashSet::new() };
@@ -134,7 +137,11 @@ impl SpotTable {
                 Some(_) => continue,
             };
             let call = text(s, "activator").to_uppercase();
-            if call.is_empty() || truthy(s.get("invalid")) || went_qrt(s) {
+            if call.is_empty()
+                || truthy(s.get("invalid"))
+                || went_qrt(s)
+                || IGNORED_PARKS.iter().any(|p| text(s, "reference").eq_ignore_ascii_case(p))
+            {
                 continue;
             }
             let spot = Spot {
@@ -371,6 +378,17 @@ mod tests {
         assert_eq!(t.count("20m", "FT8"), 1);
         assert_eq!(t.len(), 5);
         assert_eq!(t.digital_count(), 4);
+    }
+
+    #[test]
+    fn ignored_park_spots_are_skipped() {
+        let raw = vec![
+            json!({"activator": "K1A", "frequency": "7074", "mode": "FT8", "reference": "K-TEST"}),
+            json!({"activator": "K3C", "frequency": "7076", "mode": "FT8", "reference": "US-1234"}),
+        ];
+        let t = SpotTable::new(&raw, 0.0);
+        assert_eq!(t.len(), 1);
+        assert!(t.spots_for("K1A", None).is_empty());
     }
 
     #[test]
