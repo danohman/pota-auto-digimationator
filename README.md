@@ -92,7 +92,7 @@ A decode is a candidate when it's a `CQ …` or an `… RR73` / `… RRR` / `…
 - the message is `CQ POTA <call> …`
 - the callsign has an active spot on pota.app **on the band WSJT-X is on now**
 
-Turn on **Settings > Hunting > Only hunt new parks** to restrict this to stations whose spotted park you've never hunted (needs your [pota.app login](#potaapp-spots-and-hunt-counts)).
+Turn on **Settings > Hunting > Only hunt new parks** to restrict this to stations whose spotted park you've never hunted (needs you to be [signed in to pota.app](#potaapp-spots-and-hunt-counts)).
 
 ### What it skips
 
@@ -156,12 +156,12 @@ If ACLog already gets QSOs straight from WSJT-X (ACLog's own WSJT-X link or JTAl
 
 **Spots** are fetched **once a minute at most** by one background thread and kept in a local copy (`spots_cache.json`); every check reads only that copy. If a fetch fails, the last copy is kept and it retries after 10 seconds, then 30 seconds, then every minute.
 
-**Hunt counts (optional).** Enter your pota.app username and password under **Settings > Connections > pota.app account** and the lists show how often you've hunted each station and park:
+**Hunt counts (optional).** Click **Sign in with browser** under **Settings > Connections > pota.app account**. Your browser opens pota.app's own sign-in page, so accounts that use Google or another sign-in service work as well as username and password. The lists then show how often you've hunted each station and park:
 
 - a count in parentheses after a call you've worked before
 - in front of the park, an orange **NEW** chip if you've never hunted it (a purple **ATNO** when the park has never had a qualifying activation), or the count in parentheses if you have
 
-The counts come from your pota.app account and refresh every 30 minutes, so today's QSOs appear after you upload your log. The password is stored in plain text in `settings.json` on this computer and sent only to pota.app's sign-in service.
+The counts come from your pota.app account and refresh every 30 minutes, so today's QSOs appear after you upload your log. The program never sees your password. It keeps only a sign-in token in `settings.json` on this computer; if pota.app expires it (after a few weeks, perhaps), the Current Info card asks you to sign in again. Signing in uses port 8080 on this computer for a moment, so close anything else using that port first.
 
 ## Radio (CAT) settings
 

@@ -1,18 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Dan Muntz (WD4DAN)
-//! Signing in to pota.app (AWS Cognito, SRP) and fetching the operator's hunt counts.
+//! Signing in to pota.app (AWS Cognito hosted login, authorization code with PKCE) and
+//! fetching the operator's hunt counts.
 //!
-//! pota.app's Cognito client only allows USER_SRP_AUTH, so the password never leaves
-//! this machine. `start_stats_poller` posts `Event::PotaStats` or `Event::PotaStatsError`.
+//! The sign-in happens in the operator's own browser, so it works for every kind of
+//! pota.app account (password, Google, ...) and the program never sees a password.
+//! pota.app's Cognito client only accepts `http://localhost:8080/` as a loopback redirect,
+//! so that port is fixed. The refresh token is what gets saved; `start_stats_poller`
+//! trades it for ID tokens and posts `Event::PotaStats` or `Event::PotaStatsError`.
 
 use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use base64::Engine as _;
-use chrono::{DateTime, Utc};
-use hmac::{Hmac, Mac};
-use num_bigint::BigUint;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
@@ -20,42 +24,24 @@ use crate::events::{Event, Post};
 use crate::pota_spots::epoch_now;
 
 pub const COGNITO_URL: &str = "https://cognito-idp.us-east-2.amazonaws.com/";
-pub const POOL_ID: &str = "us-east-2_nA5jZ0klh";
+pub const AUTH_HOST: &str = "https://parksontheair.auth.us-east-2.amazoncognito.com";
 pub const CLIENT_ID: &str = "7hluqct0n2nckib7i7sd5753oa";
+/// the only loopback redirect pota.app's Cognito client allows (localhost:3000 and
+/// 127.0.0.1:8080 were refused with redirect_mismatch, 2026-11-14)
+pub const REDIRECT_PORT: u16 = 8080;
+const REDIRECT_URI_ENC: &str = "http%3A%2F%2Flocalhost%3A8080%2F";
+pub const REDIRECT_URI: &str = "http://localhost:8080/";
+/// how long the browser sign-in may take
+pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 pub const STATS_URL: &str = "https://api.pota.app/user/stats/hunted_activated_list?type=";
 pub const USER_AGENT: &str = "POTA-Auto-Digimationator (WD4DAN)";
 /// hunt counts only change when a log is uploaded to pota.app
 pub const REFRESH_EVERY: f64 = 30.0 * 60.0;
 pub const BACKOFF: [f64; 3] = [120.0, 300.0, 600.0];
 
-/// Cognito's 3072-bit SRP group (RFC 5054), g = 2.
-const N_HEX: &str = concat!(
-    "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74",
-    "020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1437",
-    "4FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED",
-    "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF05",
-    "98DA48361C55D39A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB",
-    "9ED529077096966D670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B",
-    "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF695581718",
-    "3995497CEA956AE515D2261898FA051015728E5A8AAAC42DAD33170D04507A33",
-    "A85521ABDF1CBA64ECFB850458DBEF0A8AEA71575D060C7DB3970F85A6E1E4C7",
-    "ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6BF12FFA06D98A0864",
-    "D87602733EC86A64521F2B18177B200CBBE117577A615D6C770988C0BAD946E2",
-    "08E24FA074E5AB3143DB5BFCE0FD108E4B82D120A93AD2CAFFFFFFFFFFFFFFFF",
-);
-const INFO_BITS: &[u8] = b"Caldera Derived Key";
-
-pub fn n() -> BigUint {
-    BigUint::parse_bytes(N_HEX.as_bytes(), 16).unwrap()
-}
-
-pub fn g() -> BigUint {
-    BigUint::from(2u32)
-}
-
 #[derive(Debug)]
 pub enum FetchError {
-    /// wrong password etc.: don't retry until it changes
+    /// not signed in, or the saved sign-in no longer works: don't retry until the user signs in again
     Auth(String),
     /// an HTTP error status
     Http(u16, String),
@@ -81,69 +67,16 @@ impl std::fmt::Display for FetchError {
     }
 }
 
-/// Bytes of `n` as Cognito pads them: a leading 00 if the top bit is set.
-pub fn pad(n: &BigUint) -> Vec<u8> {
-    let mut b = n.to_bytes_be();
-    if b[0] & 0x80 != 0 {
-        b.insert(0, 0);
-    }
-    b
-}
-
-pub fn hash(data: &[u8]) -> Vec<u8> {
-    Sha256::digest(data).to_vec()
-}
-
-pub fn int(data: &[u8]) -> BigUint {
-    BigUint::from_bytes_be(data)
-}
-
-pub fn k() -> BigUint {
-    int(&hash(&[pad(&n()), pad(&g())].concat()))
-}
-
-pub fn hmac(key: &[u8], msg: &[u8]) -> Vec<u8> {
-    let mut m = Hmac::<Sha256>::new_from_slice(key).unwrap();
-    m.update(msg);
-    m.finalize().into_bytes().to_vec()
-}
-
-/// (private a, public A) for the first SRP step.
-pub fn srp_start(a: Option<BigUint>) -> (BigUint, BigUint) {
-    let a = a.unwrap_or_else(|| {
-        let mut buf = [0u8; 128];
-        getrandom::getrandom(&mut buf).expect("random");
-        int(&buf)
-    }) % n();
-    let big_a = g().modpow(&a, &n());
-    (a, big_a)
-}
-
-/// The 16-byte HMAC key Cognito derives from the shared SRP secret.
-pub fn srp_key(a: &BigUint, big_a: &BigUint, big_b: &BigUint, salt: &BigUint, username: &str, password: &str) -> Vec<u8> {
-    let pool = POOL_ID.split_once('_').unwrap().1;
-    let nn = n();
-    let u = int(&hash(&[pad(big_a), pad(big_b)].concat()));
-    let inner = hash(format!("{pool}{username}:{password}").as_bytes());
-    let x = int(&hash(&[pad(salt), inner].concat()));
-    let kgx = (k() * g().modpow(&x, &nn)) % &nn;
-    let base = (big_b % &nn + &nn - kgx) % &nn;
-    let s = base.modpow(&(a + &u * &x), &nn);
-    let prk = hmac(&pad(&u), &pad(&s));
-    hmac(&prk, &[INFO_BITS, b"\x01"].concat())[..16].to_vec()
-}
-
-/// e.g. "Sun Oct 25 12:00:00 UTC 2026": day without zero padding
-pub fn timestamp(now: DateTime<Utc>) -> String {
-    now.format("%a %b %-d %H:%M:%S UTC %Y").to_string()
-}
-
-pub fn srp_signature(key: &[u8], username: &str, secret_block: &str, timestamp: &str) -> Result<String, FetchError> {
-    let pool = POOL_ID.split_once('_').unwrap().1;
-    let b64 = base64::engine::general_purpose::STANDARD;
-    let block = b64.decode(secret_block).map_err(|e| FetchError::Auth(e.to_string()))?;
-    let msg = [pool.as_bytes(), username.as_bytes(), &block, timestamp.as_bytes()].concat();
-    Ok(b64.encode(hmac(key, &msg)))
+/// A Cognito error body {"message": ..., "__type": ...} or OAuth {"error": ...} as text.
+fn error_text(code: u16, body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|err| {
+            ["message", "error_description", "error", "__type"]
+                .iter()
+                .find_map(|k| err.get(*k).and_then(Value::as_str).map(str::to_string))
+        })
+        .unwrap_or_else(|| format!("HTTP Error {code}"))
 }
 
 fn cognito(target: &str, body: Value) -> Result<Value, FetchError> {
@@ -157,19 +90,7 @@ fn cognito(target: &str, body: Value) -> Result<Value, FetchError> {
             let text = resp.into_string().map_err(|e| FetchError::Net(e.to_string()))?;
             serde_json::from_str(&text).map_err(|e| FetchError::Net(e.to_string()))
         }
-        Err(ureq::Error::Status(code, resp)) => {
-            let text = resp.into_string().unwrap_or_default();
-            match serde_json::from_str::<Value>(&text) {
-                Ok(err) => {
-                    let msg = err.get("message").and_then(Value::as_str)
-                        .or_else(|| err.get("__type").and_then(Value::as_str))
-                        .map(str::to_string)
-                        .unwrap_or_else(|| format!("HTTP Error {code}"));
-                    Err(FetchError::Auth(msg))
-                }
-                Err(_) => Err(FetchError::Auth(format!("HTTP Error {code}"))),
-            }
-        }
+        Err(ureq::Error::Status(code, resp)) => Err(FetchError::Auth(error_text(code, &resp.into_string().unwrap_or_default()))),
         Err(e) => Err(FetchError::Net(e.to_string())),
     }
 }
@@ -181,6 +102,14 @@ pub struct Tokens {
     pub expires: f64,
 }
 
+impl Tokens {
+    /// Only a saved refresh token: the first use trades it for an ID token.
+    pub fn from_refresh(refresh_token: &str) -> Option<Tokens> {
+        let r = refresh_token.trim();
+        (!r.is_empty()).then(|| Tokens { id_token: String::new(), refresh_token: Some(r.to_string()), expires: 0.0 })
+    }
+}
+
 fn tokens(result: &Value, old_refresh: Option<String>) -> Result<Tokens, FetchError> {
     let id = result.get("IdToken").and_then(Value::as_str).ok_or_else(|| FetchError::Net("no IdToken".into()))?;
     Ok(Tokens {
@@ -190,38 +119,200 @@ fn tokens(result: &Value, old_refresh: Option<String>) -> Result<Tokens, FetchEr
     })
 }
 
-/// Sign in.
-pub fn login(username: &str, password: &str) -> Result<Tokens, FetchError> {
-    let (a, big_a) = srp_start(None);
-    let r = cognito("InitiateAuth", json!({
-        "AuthFlow": "USER_SRP_AUTH", "ClientId": CLIENT_ID,
-        "AuthParameters": {"USERNAME": username, "SRP_A": big_a.to_str_radix(16)}}))?;
-    if r.get("ChallengeName").and_then(Value::as_str) != Some("PASSWORD_VERIFIER") {
-        return Err(FetchError::Auth(format!("unsupported sign-in step: {}", r.get("ChallengeName").unwrap_or(&Value::Null))));
-    }
-    let p = &r["ChallengeParameters"];
-    let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let uid = s("USER_ID_FOR_SRP");
-    let parse = |k: &str| BigUint::parse_bytes(s(k).as_bytes(), 16).ok_or_else(|| FetchError::Net(format!("bad {k}")));
-    let key = srp_key(&a, &big_a, &parse("SRP_B")?, &parse("SALT")?, &uid, password);
-    let ts = timestamp(Utc::now());
-    let r = cognito("RespondToAuthChallenge", json!({
-        "ChallengeName": "PASSWORD_VERIFIER", "ClientId": CLIENT_ID,
-        "ChallengeResponses": {
-            "USERNAME": uid, "PASSWORD_CLAIM_SECRET_BLOCK": s("SECRET_BLOCK"),
-            "TIMESTAMP": ts,
-            "PASSWORD_CLAIM_SIGNATURE": srp_signature(&key, &uid, &s("SECRET_BLOCK"), &ts)?}}))?;
-    match r.get("AuthenticationResult") {
-        Some(res) => tokens(res, None),
-        None => Err(FetchError::Auth(format!("unsupported sign-in step: {}", r.get("ChallengeName").unwrap_or(&Value::Null)))),
-    }
-}
-
 pub fn refresh(refresh_token: &str) -> Result<Tokens, FetchError> {
     let r = cognito("InitiateAuth", json!({
         "AuthFlow": "REFRESH_TOKEN_AUTH", "ClientId": CLIENT_ID,
         "AuthParameters": {"REFRESH_TOKEN": refresh_token}}))?;
     tokens(r.get("AuthenticationResult").unwrap_or(&Value::Null), Some(refresh_token.to_string()))
+}
+
+// --- browser sign-in (authorization code + PKCE) ----------------------------------------
+
+fn b64url(data: &[u8]) -> String {
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(data)
+}
+
+fn random_b64(bytes: usize) -> String {
+    let mut buf = vec![0u8; bytes];
+    getrandom::getrandom(&mut buf).expect("random");
+    b64url(&buf)
+}
+
+/// The S256 code challenge for a PKCE verifier (RFC 7636).
+pub fn pkce_challenge(verifier: &str) -> String {
+    b64url(&Sha256::digest(verifier.as_bytes()))
+}
+
+pub fn authorize_url(challenge: &str, state: &str) -> String {
+    format!(
+        "{AUTH_HOST}/oauth2/authorize?client_id={CLIENT_ID}&response_type=code&scope=openid+email+profile\
+         &redirect_uri={REDIRECT_URI_ENC}&code_challenge={challenge}&code_challenge_method=S256&state={state}"
+    )
+}
+
+/// What a request to the loopback listener turned out to be.
+#[derive(Debug, PartialEq)]
+pub enum Redirect {
+    Code(String),
+    /// the user said no, or the state did not match
+    Denied(String),
+    /// something else (a favicon request, a probe): ignore
+    Other,
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        match b[i] {
+            b'+' => out.push(b' '),
+            b'%' => match b.get(i + 1..i + 3).and_then(|h| std::str::from_utf8(h).ok()).and_then(|h| u8::from_str_radix(h, 16).ok()) {
+                Some(v) => {
+                    out.push(v);
+                    i += 2;
+                }
+                None => out.push(b'%'),
+            },
+            c => out.push(c),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Parse the request line of the browser's redirect, e.g. `GET /?code=abc&state=xyz HTTP/1.1`.
+pub fn parse_redirect(request_line: &str, state: &str) -> Redirect {
+    let mut parts = request_line.split_whitespace();
+    let (Some("GET"), Some(target)) = (parts.next(), parts.next()) else { return Redirect::Other };
+    let Some((path, query)) = target.split_once('?') else { return Redirect::Other };
+    if path != "/" {
+        return Redirect::Other;
+    }
+    let get = |k: &str| query.split('&').find_map(|kv| kv.split_once('=').filter(|(n, _)| *n == k).map(|(_, v)| percent_decode(v)));
+    if let Some(e) = get("error") {
+        return Redirect::Denied(get("error_description").filter(|d| !d.is_empty()).unwrap_or(e));
+    }
+    match (get("code"), get("state")) {
+        (Some(code), Some(s)) if s == state && !code.is_empty() => Redirect::Code(code),
+        (Some(_), _) => Redirect::Denied("the sign-in response did not match this request".into()),
+        _ => Redirect::Other,
+    }
+}
+
+fn open_browser(url: &str) -> Result<(), FetchError> {
+    std::process::Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| FetchError::Net(format!("could not open your browser: {e}")))
+}
+
+const DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA Auto-Digimationator</title></head>\
+<body style=\"font-family:sans-serif;margin:3em\"><h2>You are signed in</h2>\
+<p>You can close this tab and go back to POTA Auto-Digimationator.</p></body></html>";
+const FAIL_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA Auto-Digimationator</title></head>\
+<body style=\"font-family:sans-serif;margin:3em\"><h2>Sign-in did not finish</h2>\
+<p>Go back to POTA Auto-Digimationator and try again.</p></body></html>";
+
+fn reply(mut s: TcpStream, status: &str, body: &str) {
+    let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+    let _ = s.flush();
+}
+
+/// Wait for the browser to come back with the code. `Ok(None)` = cancelled.
+fn wait_for_code(listeners: &[TcpListener], state: &str, cancel: &AtomicBool) -> Result<Option<String>, FetchError> {
+    let deadline = Instant::now() + LOGIN_TIMEOUT;
+    loop {
+        if cancel.load(Ordering::Relaxed) {
+            return Ok(None);
+        }
+        if Instant::now() >= deadline {
+            return Err(FetchError::Auth("timed out waiting for the browser sign-in".into()));
+        }
+        let mut idle = true;
+        for l in listeners {
+            let Ok((mut stream, _)) = l.accept() else { continue };
+            idle = false;
+            let _ = stream.set_nonblocking(false);
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = [0u8; 4096];
+            let n = stream.read(&mut buf).unwrap_or(0);
+            let text = String::from_utf8_lossy(&buf[..n]);
+            match parse_redirect(text.lines().next().unwrap_or(""), state) {
+                Redirect::Code(c) => {
+                    reply(stream, "200 OK", DONE_PAGE);
+                    return Ok(Some(c));
+                }
+                Redirect::Denied(why) => {
+                    reply(stream, "200 OK", FAIL_PAGE);
+                    return Err(FetchError::Auth(why));
+                }
+                Redirect::Other => reply(stream, "404 Not Found", ""),
+            }
+        }
+        if idle {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+}
+
+fn exchange_code(code: &str, verifier: &str) -> Result<Tokens, FetchError> {
+    let r = ureq::post(&format!("{AUTH_HOST}/oauth2/token"))
+        .timeout(Duration::from_secs(20))
+        .send_form(&[
+            ("grant_type", "authorization_code"),
+            ("client_id", CLIENT_ID),
+            ("code", code),
+            ("redirect_uri", REDIRECT_URI),
+            ("code_verifier", verifier),
+        ]);
+    let v: Value = match r {
+        Ok(resp) => serde_json::from_str(&resp.into_string().map_err(|e| FetchError::Net(e.to_string()))?).map_err(|e| FetchError::Net(e.to_string()))?,
+        Err(ureq::Error::Status(code, resp)) => return Err(FetchError::Auth(error_text(code, &resp.into_string().unwrap_or_default()))),
+        Err(e) => return Err(FetchError::Net(e.to_string())),
+    };
+    let id = v.get("id_token").and_then(Value::as_str).ok_or_else(|| FetchError::Net("no id_token".into()))?;
+    Ok(Tokens {
+        id_token: id.to_string(),
+        refresh_token: v.get("refresh_token").and_then(Value::as_str).map(str::to_string),
+        expires: epoch_now() + v.get("expires_in").and_then(Value::as_f64).unwrap_or(3600.0) - 60.0,
+    })
+}
+
+/// Sign in through the default browser. Blocks until done, cancelled (`Ok(None)`) or
+/// timed out; call it from a worker thread.
+pub fn browser_login(cancel: &AtomicBool) -> Result<Option<Tokens>, FetchError> {
+    let mut listeners = vec![];
+    match TcpListener::bind(("127.0.0.1", REDIRECT_PORT)) {
+        Ok(l) => listeners.push(l),
+        Err(e) => return Err(FetchError::Net(format!("port {REDIRECT_PORT} is in use ({e}); close whatever is using it and try again"))),
+    }
+    if let Ok(l) = TcpListener::bind(("::1", REDIRECT_PORT)) {
+        listeners.push(l); // "localhost" may resolve to IPv6 first
+    }
+    for l in &listeners {
+        l.set_nonblocking(true).map_err(|e| FetchError::Net(e.to_string()))?;
+    }
+    let verifier = random_b64(48);
+    let state = random_b64(16);
+    open_browser(&authorize_url(&pkce_challenge(&verifier), &state))?;
+    match wait_for_code(&listeners, &state, cancel)? {
+        Some(code) => exchange_code(&code, &verifier).map(Some),
+        None => Ok(None),
+    }
+}
+
+/// The account name (email, else Cognito username) inside an ID token, for display.
+pub fn account_of(id_token: &str) -> String {
+    let Some(payload) = id_token.split('.').nth(1) else { return String::new() };
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload.trim_end_matches('=')) else { return String::new() };
+    let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { return String::new() };
+    ["email", "cognito:username", "name"]
+        .iter()
+        .find_map(|k| v.get(*k).and_then(Value::as_str).filter(|s| !s.is_empty()))
+        .unwrap_or("")
+        .to_string()
 }
 
 /// How many times the operator has hunted each park and each activator. pota.app
@@ -274,27 +365,24 @@ pub fn fetch_counts(id_token: &str) -> Result<HuntCounts, FetchError> {
 }
 
 struct PollerState {
-    user: String,
-    password: String,
     tokens: Option<Tokens>,
     wake: bool,
     stop: bool,
     next_fetch: Option<f64>,
 }
 
-/// Signs in with the saved account and refreshes the hunt counts every 30 minutes
-/// (and at once when `configure` is called). Idle without credentials.
+/// Refreshes the hunt counts every 30 minutes (and at once when `configure` is called)
+/// with the saved sign-in. Idle when signed out.
 pub struct StatsPoller {
     state: Mutex<PollerState>,
     cv: Condvar,
 }
 
 impl StatsPoller {
-    pub fn configure(&self, username: &str, password: &str) {
+    /// A new sign-in (or none, when signed out).
+    pub fn configure(&self, tokens: Option<Tokens>) {
         let mut s = self.state.lock().unwrap();
-        s.user = username.trim().to_string();
-        s.password = password.to_string();
-        s.tokens = None;
+        s.tokens = tokens;
         s.wake = true;
         self.cv.notify_all();
     }
@@ -306,17 +394,11 @@ impl StatsPoller {
         self.cv.notify_all();
     }
 
-    /// A valid ID token for the saved account (refreshed or signed in again as needed).
+    /// A valid ID token for the saved sign-in (refreshed as needed).
     /// Blocks on the network; call from a worker thread.
     pub fn token(&self) -> Result<String, FetchError> {
-        let (user, password, mut tok) = {
-            let s = self.state.lock().unwrap();
-            (s.user.clone(), s.password.clone(), s.tokens.clone())
-        };
-        if user.is_empty() || password.is_empty() {
-            return Err(FetchError::Auth("not signed in to pota.app".into()));
-        }
-        let id = id_token(&Api::default(), &mut tok, &user, &password)?;
+        let mut tok = self.state.lock().unwrap().tokens.clone();
+        let id = id_token(&Api::default(), &mut tok)?;
         self.state.lock().unwrap().tokens = tok;
         Ok(id)
     }
@@ -328,7 +410,7 @@ impl StatsPoller {
 
 pub fn start_stats_poller(post: Post) -> Arc<StatsPoller> {
     let p = Arc::new(StatsPoller {
-        state: Mutex::new(PollerState { user: String::new(), password: String::new(), tokens: None, wake: false, stop: false, next_fetch: None }),
+        state: Mutex::new(PollerState { tokens: None, wake: false, stop: false, next_fetch: None }),
         cv: Condvar::new(),
     });
     let me = p.clone();
@@ -338,65 +420,67 @@ pub fn start_stats_poller(post: Post) -> Arc<StatsPoller> {
 
 /// The functions the poller uses, swappable for tests.
 pub struct Api {
-    pub login: Box<dyn Fn(&str, &str) -> Result<Tokens, FetchError> + Send>,
     pub refresh: Box<dyn Fn(&str) -> Result<Tokens, FetchError> + Send>,
     pub fetch: Box<dyn Fn(&str) -> Result<HuntCounts, FetchError> + Send>,
 }
 
 impl Default for Api {
     fn default() -> Self {
-        Api { login: Box::new(login), refresh: Box::new(refresh), fetch: Box::new(fetch_counts) }
+        Api { refresh: Box::new(refresh), fetch: Box::new(fetch_counts) }
     }
 }
 
-fn id_token(api: &Api, tok: &mut Option<Tokens>, user: &str, password: &str) -> Result<String, FetchError> {
-    if let Some(t) = tok.as_ref() {
-        if t.expires > epoch_now() {
-            return Ok(t.id_token.clone());
-        }
-        if let Some(r) = t.refresh_token.clone() {
-            if let Ok(t) = (api.refresh)(&r) {
-                let id = t.id_token.clone();
-                *tok = Some(t);
-                return Ok(id);
-            }
-        }
+const EXPIRED: &str = "your pota.app sign-in has expired; sign in again in Settings";
+
+fn id_token(api: &Api, tok: &mut Option<Tokens>) -> Result<String, FetchError> {
+    let Some(t) = tok.as_ref() else { return Err(FetchError::Auth("not signed in to pota.app".into())) };
+    if t.expires > epoch_now() && !t.id_token.is_empty() {
+        return Ok(t.id_token.clone());
     }
-    let t = (api.login)(user, password)?;
-    let id = t.id_token.clone();
-    *tok = Some(t);
-    Ok(id)
+    let Some(r) = t.refresh_token.clone() else { return Err(FetchError::Auth(EXPIRED.into())) };
+    match (api.refresh)(&r) {
+        Ok(t) => {
+            let id = t.id_token.clone();
+            *tok = Some(t);
+            Ok(id)
+        }
+        // the server said no: the refresh token has expired or been revoked
+        Err(FetchError::Auth(e)) => {
+            *tok = None;
+            Err(FetchError::Auth(format!("{EXPIRED} ({e})")))
+        }
+        Err(e) => Err(e),
+    }
 }
 
 /// Fetch the counts; on 401/403 the token has expired or been revoked, so refresh it
-/// (or sign in again) and retry once.
-pub fn fetch_with_retry(api: &Api, tok: &mut Option<Tokens>, user: &str, password: &str) -> Result<HuntCounts, FetchError> {
-    match (api.fetch)(&id_token(api, tok, user, password)?) {
+/// and retry once.
+pub fn fetch_with_retry(api: &Api, tok: &mut Option<Tokens>) -> Result<HuntCounts, FetchError> {
+    match (api.fetch)(&id_token(api, tok)?) {
         Err(FetchError::Http(code, _)) if code == 401 || code == 403 => {}
         other => return other,
     }
-    let old = tok.take();
-    if let Some(r) = old.and_then(|t| t.refresh_token) {
-        *tok = (api.refresh)(&r).ok();
+    if let Some(t) = tok.as_mut() {
+        t.expires = 0.0; // force a refresh
     }
-    (api.fetch)(&id_token(api, tok, user, password)?)
+    (api.fetch)(&id_token(api, tok)?)
 }
 
 fn run(me: Arc<StatsPoller>, post: Post) {
     let api = Api::default();
     let mut failures = 0usize;
     loop {
-        let (user, password, mut tok) = {
+        let mut tok = {
             let mut s = me.state.lock().unwrap();
             if s.stop {
                 return;
             }
             s.wake = false;
-            (s.user.clone(), s.password.clone(), s.tokens.clone())
+            s.tokens.clone()
         };
         let mut wait: Option<f64> = None;
-        if !user.is_empty() && !password.is_empty() {
-            match fetch_with_retry(&api, &mut tok, &user, &password) {
+        if tok.is_some() {
+            match fetch_with_retry(&api, &mut tok) {
                 Ok(c) => {
                     post(Event::PotaStats(Arc::new(c)));
                     failures = 0;
@@ -404,9 +488,6 @@ fn run(me: Arc<StatsPoller>, post: Post) {
                 }
                 Err(FetchError::Auth(e)) => post(Event::PotaStatsError(format!("pota.app sign-in failed: {e}"))),
                 Err(e) => {
-                    if matches!(e, FetchError::Http(..)) {
-                        tok = None;
-                    }
                     let w = BACKOFF[failures.min(BACKOFF.len() - 1)];
                     failures += 1;
                     wait = Some(w);
@@ -416,15 +497,15 @@ fn run(me: Arc<StatsPoller>, post: Post) {
         }
         let mut s = me.state.lock().unwrap();
         if !s.wake {
-            s.tokens = tok; // a new configure() has dropped them otherwise
+            s.tokens = tok; // a new configure() has replaced them otherwise
         }
         s.next_fetch = wait.map(|w| epoch_now() + w);
-        let deadline = wait.map(|w| std::time::Instant::now() + Duration::from_secs_f64(w));
+        let deadline = wait.map(|w| Instant::now() + Duration::from_secs_f64(w));
         while !s.wake && !s.stop {
             match deadline {
                 None => s = me.cv.wait(s).unwrap(),
                 Some(d) => {
-                    let now = std::time::Instant::now();
+                    let now = Instant::now();
                     if now >= d {
                         break;
                     }
@@ -438,39 +519,48 @@ fn run(me: Arc<StatsPoller>, post: Post) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
-    fn client_and_server_derive_the_same_secret() {
-        let (user, password) = ("uid-123", "hunter2");
-        let salt = BigUint::parse_bytes(b"ABCDEF1234567890", 16).unwrap();
-        let pool = POOL_ID.split_once('_').unwrap().1;
-        let nn = n();
-        let x = int(&hash(&[pad(&salt), hash(format!("{pool}{user}:{password}").as_bytes())].concat()));
-        let v = g().modpow(&x, &nn);
-        let (a, big_a) = srp_start(Some(BigUint::parse_bytes(b"12345678901234567890123456789", 10).unwrap()));
-        let b = BigUint::parse_bytes(b"987654321987654321987654321", 10).unwrap();
-        let big_b = (k() * &v + g().modpow(&b, &nn)) % &nn;
-        let u = int(&hash(&[pad(&big_a), pad(&big_b)].concat()));
-        let server_s = (&big_a * v.modpow(&u, &nn)).modpow(&b, &nn);
-        let client_key = srp_key(&a, &big_a, &big_b, &salt, user, password);
-        let prk = hmac(&pad(&u), &pad(&server_s));
-        let server_key = hmac(&prk, &[INFO_BITS, b"\x01"].concat())[..16].to_vec();
-        assert_eq!(client_key, server_key);
-        assert_ne!(client_key, srp_key(&a, &big_a, &big_b, &salt, user, "wrong"));
+    fn pkce_matches_rfc_7636_example() {
+        assert_eq!(pkce_challenge("dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"), "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
     }
 
     #[test]
-    fn pad_adds_zero_byte_when_top_bit_set() {
-        assert_eq!(pad(&BigUint::from(0x80u32)), [0x00, 0x80]);
-        assert_eq!(pad(&BigUint::from(0x7Fu32)), [0x7f]);
-        assert_eq!(pad(&BigUint::from(0x123u32)), [0x01, 0x23]);
+    fn authorize_url_names_the_fixed_redirect() {
+        let u = authorize_url("CH", "ST");
+        assert!(u.contains("redirect_uri=http%3A%2F%2Flocalhost%3A8080%2F"));
+        assert!(u.contains("code_challenge=CH&code_challenge_method=S256&state=ST"));
+        assert!(u.contains(CLIENT_ID));
     }
 
     #[test]
-    fn timestamp_has_unpadded_day() {
-        let t = Utc.with_ymd_and_hms(2026, 10, 5, 7, 8, 9).unwrap();
-        assert_eq!(timestamp(t), "Mon Oct 5 07:08:09 UTC 2026");
+    fn redirect_parsing() {
+        assert_eq!(parse_redirect("GET /?code=abc%2Fd&state=xyz HTTP/1.1", "xyz"), Redirect::Code("abc/d".into()));
+        assert!(matches!(parse_redirect("GET /?code=abc&state=other HTTP/1.1", "xyz"), Redirect::Denied(_)));
+        assert_eq!(
+            parse_redirect("GET /?error=access_denied&error_description=User+said+no&state=xyz HTTP/1.1", "xyz"),
+            Redirect::Denied("User said no".into())
+        );
+        assert_eq!(parse_redirect("GET /favicon.ico HTTP/1.1", "xyz"), Redirect::Other);
+        assert_eq!(parse_redirect("GET / HTTP/1.1", "xyz"), Redirect::Other);
+        assert_eq!(parse_redirect("POST /?code=a&state=xyz HTTP/1.1", "xyz"), Redirect::Other);
+        assert_eq!(parse_redirect("", "xyz"), Redirect::Other);
+    }
+
+    #[test]
+    fn percent_decode_edges() {
+        assert_eq!(percent_decode("a%20b+c%2"), "a b c%2");
+        assert_eq!(percent_decode("%zz"), "%zz");
+        assert_eq!(percent_decode("100%"), "100%");
+    }
+
+    #[test]
+    fn account_comes_from_the_id_token() {
+        let payload = b64url(br#"{"email":"wd4dan@example.com","cognito:username":"Google_123"}"#);
+        assert_eq!(account_of(&format!("h.{payload}.s")), "wd4dan@example.com");
+        let payload = b64url(br#"{"cognito:username":"Google_123"}"#);
+        assert_eq!(account_of(&format!("h.{payload}.s")), "Google_123");
+        assert_eq!(account_of("garbage"), "");
     }
 
     #[test]
@@ -485,11 +575,45 @@ mod tests {
     }
 
     #[test]
+    fn saved_refresh_token_is_traded_for_an_id_token() {
+        let api = Api {
+            refresh: Box::new(|r| Ok(Tokens { id_token: "fresh".into(), refresh_token: Some(r.into()), expires: 9e12 })),
+            fetch: Box::new(|_| unreachable!()),
+        };
+        let mut tok = Tokens::from_refresh(" saved ");
+        assert_eq!(id_token(&api, &mut tok).unwrap(), "fresh");
+        assert_eq!(tok.unwrap().refresh_token.as_deref(), Some("saved"));
+        assert!(Tokens::from_refresh("  ").is_none());
+    }
+
+    #[test]
+    fn rejected_refresh_token_means_signed_out() {
+        let api = Api {
+            refresh: Box::new(|_| Err(FetchError::Auth("Refresh Token has expired".into()))),
+            fetch: Box::new(|_| unreachable!()),
+        };
+        let mut tok = Tokens::from_refresh("old");
+        assert!(matches!(id_token(&api, &mut tok), Err(FetchError::Auth(_))));
+        assert!(tok.is_none());
+        assert!(matches!(id_token(&api, &mut tok), Err(FetchError::Auth(_))));
+    }
+
+    #[test]
+    fn network_trouble_keeps_the_sign_in() {
+        let api = Api {
+            refresh: Box::new(|_| Err(FetchError::Net("offline".into()))),
+            fetch: Box::new(|_| unreachable!()),
+        };
+        let mut tok = Tokens::from_refresh("old");
+        assert!(matches!(id_token(&api, &mut tok), Err(FetchError::Net(_))));
+        assert!(tok.is_some());
+    }
+
+    #[test]
     fn unauthorized_refreshes_token_and_retries() {
         let calls = Arc::new(Mutex::new(Vec::<String>::new()));
         let c2 = calls.clone();
         let api = Api {
-            login: Box::new(|_, _| panic!("should refresh, not sign in again")),
             refresh: Box::new(|r| Ok(Tokens { id_token: "new".into(), refresh_token: Some(r.into()), expires: 9e12 })),
             fetch: Box::new(move |tok| {
                 c2.lock().unwrap().push(tok.to_string());
@@ -500,7 +624,7 @@ mod tests {
             }),
         };
         let mut tok = Some(Tokens { id_token: "old".into(), refresh_token: Some("r".into()), expires: 9e12 });
-        assert_eq!(fetch_with_retry(&api, &mut tok, "u", "p").unwrap().park("US-1"), 1);
+        assert_eq!(fetch_with_retry(&api, &mut tok).unwrap().park("US-1"), 1);
         assert_eq!(*calls.lock().unwrap(), ["old", "new"]);
     }
 }

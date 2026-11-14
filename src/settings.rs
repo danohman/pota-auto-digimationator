@@ -102,9 +102,11 @@ pub struct Settings {
     /// "JA 20m FT8" keys: programs hidden on that band and mode (lists, counts, hunting)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_programs: Vec<String>,
-    /// pota.app account, for the hunt-count chips
+    /// pota.app account name (shown only), for the hunt-count chips
     pub pota_user: String,
-    pub pota_password: String,
+    /// the browser sign-in's refresh token; "" = signed out. (Older versions saved
+    /// `pota_password`; that key is ignored on load and gone at the next save.)
+    pub pota_refresh_token: String,
     /// respot the activator to pota.app after each logged QSO
     pub respot: bool,
     /// look for a newer release on GitHub now and then
@@ -166,7 +168,7 @@ impl Default for Settings {
             answer_callers: false,
             hidden_programs: Vec::new(),
             pota_user: String::new(),
-            pota_password: String::new(),
+            pota_refresh_token: String::new(),
             respot: true,
             update_check: true,
             respot_message: "{MODE}: S:{RST_SENT} / R:{RST_RCVD}".into(),

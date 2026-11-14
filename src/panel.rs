@@ -110,8 +110,6 @@ pub struct Panel {
     /// the logger chosen in the Logging tab drop-down and the host/port text of every logger
     lg_sel: usize,
     lg_bufs: Vec<(String, String)>,
-    user: String,
-    pass: String,
     respot_msg: String,
     error: String,
     focus_first: bool,
@@ -146,12 +144,14 @@ enum Do {
     ResetSound(Kind),
     ApplyUdp,
     ResetUdp,
-    SavePota,
+    DonePota,
     SaveRespot,
     RunWizard,
     ResetSettings,
     TestCat,
-    CheckPota,
+    PotaSignIn,
+    PotaCancel,
+    PotaSignOut,
 }
 
 /// A vertical stack of rows, drawn or only measured.
@@ -685,12 +685,8 @@ impl Panel {
                 self.group = app.s.udp_group.clone();
                 self.port = app.s.udp_port.to_string();
             }
-            Page::Pota => {
-                self.user = app.s.pota_user.clone();
-                self.pass = app.s.pota_password.clone();
-            }
             Page::Respot => self.respot_msg = app.s.respot_message.clone(),
-            Page::Main => {}
+            Page::Pota | Page::Main => {}
         }
     }
 
@@ -1330,48 +1326,56 @@ impl Panel {
         }
     }
 
-    /// "Check credentials" button with the result of the last check beside it.
-    fn check_creds_row(l: &mut L, app: &App) {
+    /// "Sign in with browser" button (Cancel while waiting, Sign out when signed in) with
+    /// the result of the last attempt below it.
+    fn sign_in_row(l: &mut L, app: &App) {
         let (p, f) = (l.p, l.f);
-        let checking = app.cred_checking;
-        let b = l.small_button(if checking { "Checking…" } else { "Check credentials" });
+        let busy = app.cred_checking;
+        let signed = app.pota_signed_in();
+        let b = l.small_button(if busy { "Waiting for the browser…" } else if signed { "Sign in again" } else { "Sign in with browser" });
         let sz = b.size(l.ui);
         l.y += 6.0;
         if l.paint {
             let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
-            if l.button(&b, r, Id::unique("check-creds"), !checking) {
-                l.act.push(Do::CheckPota);
+            if l.button(&b, r, Id::unique("pota-sign-in"), !busy) {
+                l.act.push(Do::PotaSignIn);
             }
-            if let Some((ok, text)) = &app.cred_result {
-                l.text(l.left + sz.x + 10.0, l.y + ((sz.y - f.small.m.linespace) / 2.0).floor(), text, &f.small, if *ok { p.ok } else { p.bad });
+            let second = if busy { Some(("Cancel", Do::PotaCancel)) } else if signed { Some(("Sign out", Do::PotaSignOut)) } else { None };
+            if let Some((label, act)) = second {
+                let b2 = l.small_button(label);
+                let r2 = Rect::from_min_size(Pos2::new(l.left + sz.x + 8.0, l.y), b2.size(l.ui));
+                if l.button(&b2, r2, Id::unique("pota-sign-out"), true) {
+                    l.act.push(act);
+                }
             }
         }
         l.y += sz.y + 6.0;
+        let w = l.right - l.left - 2.0;
+        let line = match &app.cred_result {
+            Some((ok, text)) => Some((text.clone(), if *ok { p.ok } else { p.bad })),
+            None if busy => Some(("Finish signing in to pota.app in your browser, then come back here.".to_string(), p.muted)),
+            None => None,
+        };
+        if let Some((text, c)) = line {
+            l.paragraph(&text, &f.small, c, w, 0.0, 4.0);
+        }
     }
 
-    /// pota.app username and password, for the hunt counts.
+    /// pota.app sign-in (through the browser), for the hunt counts and respotting.
     fn pota_page(&mut self, app: &mut App, l: &mut L) {
         let (p, f) = (l.p, l.f);
         l.header("pota.app account", true);
         l.y += 8.0;
-        let focus = self.focus_first && l.paint;
-        if l.paint {
-            self.focus_first = false;
-        }
-        let (mut u, mut pw) = (self.user.clone(), self.pass.clone());
-        l.form(&mut [("Username", &mut u, 26.0, false), ("Password", &mut pw, 26.0, true)], 6.0, focus);
-        self.user = u;
-        self.pass = pw;
-        l.paragraph("The username or email you sign in with at pota.app. Used only to read your hunt counts, so spots show \"new to me\" parks and how often you've worked each activator. The password is stored in settings.json on this computer.",
-                    &f.small, p.muted, WIDTH - 40.0, 8.0, 4.0);
-        Self::check_creds_row(l, app);
-        let status = app.pota_status.clone();
+        self.focus_first = false;
+        let w = l.right - l.left - 2.0;
+        l.paragraph("Sign in to read your hunt counts, so spots show \"new to me\" parks and how often you've worked each activator, and to respot. Your browser opens pota.app's own sign-in page, so Google and other accounts work too. This program never sees your password; it keeps only a sign-in token in settings.json on this computer, which pota.app may expire after a few weeks.",
+                    &f.small, p.muted, w, 0.0, 4.0);
+        Self::sign_in_row(l, app);
+        let status = app.pota_summary();
         let c = if status.starts_with("Sign-in failed") { p.bad } else { p.muted };
-        l.paragraph(&status, &f.small, c, WIDTH - 40.0, 0.0, 0.0);
-        match l.buttons_right(&[("Save", true, "Cancel"), ("Cancel", false, "Cancel")], 10.0).as_deref() {
-            Some("Save") => l.act.push(Do::SavePota),
-            Some("Cancel") => l.act.push(Do::Back),
-            _ => {}
+        l.paragraph(&status, &f.small, c, w, 0.0, 0.0);
+        if l.buttons_right(&[("Done", true, "Done")], 10.0).as_deref() == Some("Done") {
+            l.act.push(Do::DonePota);
         }
     }
 
@@ -1479,7 +1483,7 @@ impl Panel {
         }
         if enter {
             match self.page {
-                Page::Pota => acts.push(Do::SavePota),
+                Page::Pota => acts.push(Do::DonePota),
                 Page::Respot => acts.push(Do::SaveRespot),
                 Page::Wsjtx => acts.push(Do::ApplyUdp),
                 Page::Main => {}
@@ -1570,13 +1574,10 @@ impl Panel {
                     app.apply_udp(&addr, port);
                     self.show_page(app, Page::Wsjtx);
                 }
-                Do::CheckPota => {
-                    let (u, pw) = (self.user.clone(), self.pass.clone());
-                    app.check_pota(&u, &pw);
-                }
-                Do::SavePota => {
-                    let (u, pw) = (self.user.clone(), self.pass.clone());
-                    app.apply_pota_login(&u, &pw, true);
+                Do::PotaSignIn => app.start_pota_sign_in(),
+                Do::PotaCancel => app.cancel_pota_sign_in(),
+                Do::PotaSignOut => app.pota_sign_out(),
+                Do::DonePota => {
                     self.tab = Tab::Connect;
                     self.show_page(app, Page::Main);
                 }

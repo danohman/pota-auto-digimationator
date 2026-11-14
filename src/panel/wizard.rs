@@ -73,8 +73,6 @@ pub struct Wizard {
     /// the logger picked in the Logging page drop-down, and every logger.s host and port text (see Panel::logger_picker)
     lg_sel: usize,
     lg_bufs: Vec<(String, String)>,
-    user: String,
-    pass: String,
     msg: String,
     error: String,
     scroll: Scroll,
@@ -129,8 +127,6 @@ impl Wizard {
             port: s.udp_port.to_string(),
             lg_sel: 0,
             lg_bufs: vec![],
-            user: s.pota_user.clone(),
-            pass: s.pota_password.clone(),
             msg: s.respot_message.clone(),
             error: String::new(),
             scroll: Scroll::default(),
@@ -170,8 +166,6 @@ impl Wizard {
                 app.s.udp_port = port;
             }
             Step::Pota => {
-                app.s.pota_user = self.user.trim().to_string();
-                app.s.pota_password = self.pass.clone();
                 app.s.respot_message = self.msg.trim().to_string();
             }
             _ => {}
@@ -329,10 +323,9 @@ impl Wizard {
                     Kind::Pop => app.s.pop_path.clear(),
                 },
                 Do::TestCat => app.start_cat_test(),
-                Do::CheckPota => {
-                    let (u, pw) = (self.user.clone(), self.pass.clone());
-                    app.check_pota(&u, &pw);
-                }
+                Do::PotaSignIn => app.start_pota_sign_in(),
+                Do::PotaCancel => app.cancel_pota_sign_in(),
+                Do::PotaSignOut => app.pota_sign_out(),
                 Do::Page(_) | Do::Close | Do::Back | Do::Changed | Do::Tab(_) => {}
                 _ => {}
             }
@@ -382,6 +375,7 @@ impl Wizard {
         let shown = app.s.font_size;
         app.s = o;
         app.s.font_size = shown;
+        app.apply_pota_login(None, false); // the poller follows the restored sign-in
         app.set_font_size(ctx, pt);
         app.apply_theme(ctx, None);
     }
@@ -457,7 +451,7 @@ impl Wizard {
                 lead(l, "This setup goes through every setting, explains what it does and suggests a value. Nothing is transmitted and nothing is saved until you press Finish on the last page. Use Back whenever you want to change an earlier answer. Every choice can be changed later with the gear button (or Ctrl+,).");
                 l.section("Before you start");
                 bullet(l, "WSJT-X or WSJT-X Improved installed. It does not have to be running yet, but you need it to finish the connection.");
-                bullet(l, "Optional: your pota.app login, so the program can show which parks are new to you.");
+                bullet(l, "Optional: sign in to pota.app, so the program can show which parks are new to you.");
                 bullet(l, "Optional: N3FJP ACLog, Log4OM, DXKeeper, HRD Logbook, N1MM Logger+ or Logger32, if you want every QSO logged there too.");
                 bullet(l, "Optional: a Yaesu FTDX101D, Kenwood TS-590S/SG/TS-890S Elecraft, Icom or Xiegu radio controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
@@ -578,17 +572,13 @@ impl Wizard {
                 help(l, "It uses WSJT-X's own CQ, so WSJT-X's Auto Seq may answer a caller before the program does; the program follows along and logs it either way.");
             }
             Step::Pota => {
-                lead(l, "pota.app shows the current spots to anyone, so the program works without a login. Signing in adds your personal hunt counts: which parks are new to you, how often you have hunted each park, and how often you have worked each activator. It also lets the program respot.");
+                lead(l, "pota.app shows the current spots to anyone, so the program works without signing in. Signing in adds your personal hunt counts: which parks are new to you, how often you have hunted each park, and how often you have worked each activator. It also lets the program respot.");
                 l.section("Sign in (optional)");
-                let (mut u, mut pw) = (self.user.clone(), self.pass.clone());
-                l.form(&mut [("Username", &mut u, 26.0, false), ("Password", &mut pw, 26.0, true)], 6.0, false);
-                self.user = u;
-                self.pass = pw;
-                Panel::check_creds_row(l, app);
-                help(l, "The username or email you sign in with at pota.app. Leave both blank to skip. The password is saved as plain text in settings.json on this computer, so use it only on a computer you trust. It is sent only to pota.app, to read your hunt counts.");
+                Panel::sign_in_row(l, app);
+                help(l, "Your browser opens pota.app's own sign-in page, so Google and other accounts work too. Skip this to use the program without signing in. The program never sees your password; it keeps only a sign-in token in settings.json on this computer, which pota.app may expire after a few weeks (you would then sign in again from Settings).");
                 l.section("Respot");
                 switch(l, "Respot after each QSO", super::onoff(app.s.respot, "Posts the activator's spot after a logged QSO", "Never posts a spot"), &mut app.s.respot,
-                       "After a QSO is logged, the program posts a spot for the activator to pota.app with the frequency and mode, so other hunters can find them. It needs the login above and a confirmed park, and in Dry run it only says what it would have posted.");
+                       "After a QSO is logged, the program posts a spot for the activator to pota.app with the frequency and mode, so other hunters can find them. It needs you to be signed in (above) and a confirmed park, and in Dry run it only says what it would have posted.");
                 let mut m = self.msg.clone();
                 l.form(&mut [("Comment", &mut m, 26.0, false)], 6.0, false);
                 self.msg = m;
@@ -772,7 +762,7 @@ impl Wizard {
                     ("Skip weaker than", snr),
                     ("Hunting", format!("new parks only {}, after 73 {}, answer callers {}, move Tx {}", on(s.new_parks_only), on(s.pounce_signoffs), on(s.answer_callers), on(s.move_tx))),
                     ("Auto CQ message", s.cq_text.clone()),
-                    ("pota.app", if s.pota_user.is_empty() { "no login".to_string() } else { format!("{}, respot {}", s.pota_user, on(s.respot)) }),
+                    ("pota.app", if s.pota_refresh_token.is_empty() { "not signed in".to_string() } else { format!("{}, respot {}", if s.pota_user.is_empty() { "signed in" } else { &s.pota_user }, on(s.respot)) }),
                     ("Logging", {
                         let mut others: Vec<String> = Vec::new();
                         if s.aclog_enabled {

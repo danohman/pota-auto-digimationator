@@ -341,9 +341,11 @@ pub struct App {
     rig_applied: bool,
     /// the Radio tab's CAT test is running
     pub cat_testing: bool,
-    /// "Check credentials" is running / its last result (ok, text)
+    /// the browser sign-in to pota.app is waiting / its last result (ok, text)
     pub cred_checking: bool,
     pub cred_result: Option<(bool, String)>,
+    /// set to abandon the browser sign-in
+    pota_cancel: Arc<AtomicBool>,
     /// a newer GitHub release than this build, shown as a chip in Current Info
     update: Option<crate::update::Release>,
     /// the update check or the download is running
@@ -627,6 +629,7 @@ impl App {
             cat_testing: false,
             cred_checking: false,
             cred_result: None,
+            pota_cancel: Arc::new(AtomicBool::new(false)),
             update: None,
             update_busy: false,
             update_ok: false,
@@ -691,8 +694,7 @@ impl App {
     /// needs the settings to be final).
     fn start_data(&mut self) {
         self.seed_worked();
-        let (u, pw) = (self.s.pota_user.clone(), self.s.pota_password.clone());
-        self.apply_pota_login(&u, &pw, false);
+        self.apply_pota_login(None, false);
         self.after(2.0, Timer::RigClean(false));
         if self.demo.is_empty() {
             self.after(10.0, Timer::UpdateCheck);
@@ -780,8 +782,7 @@ impl App {
         }
         let (g, p) = (self.s.udp_group.clone(), self.s.udp_port);
         self.apply_udp(&g, p);
-        let (u, pw) = (self.s.pota_user.clone(), self.s.pota_password.clone());
-        self.apply_pota_login(&u, &pw, false);
+        self.apply_pota_login(None, false);
         self.settings_changed();
         Ok(())
     }
@@ -880,23 +881,40 @@ impl App {
         }));
     }
 
-    /// Sign in to pota.app with the given login (not saved) to see whether it works.
-    pub fn check_pota(&mut self, user: &str, pass: &str) {
+    /// Sign in to pota.app through the browser (Google and other accounts work too). The
+    /// result comes back as `Event::PotaLogin`.
+    pub fn start_pota_sign_in(&mut self) {
         if self.cred_checking {
-            return;
-        }
-        let (user, pass) = (user.trim().to_string(), pass.to_string());
-        if user.is_empty() || pass.is_empty() {
-            self.cred_result = Some((false, "Enter a username and a password first".into()));
             return;
         }
         self.cred_checking = true;
         self.cred_result = None;
-        let post = self.post.clone();
-        std::thread::Builder::new()
-            .name("pota-check".into())
-            .spawn(move || post(Event::PotaCheck(crate::pota_auth::login(&user, &pass).map(|_| ()).map_err(|e| e.to_string()))))
-            .ok();
+        self.pota_cancel.store(false, Ordering::Relaxed);
+        let (post, cancel) = (self.post.clone(), self.pota_cancel.clone());
+        let spawned = std::thread::Builder::new()
+            .name("pota-login".into())
+            .spawn(move || post(Event::PotaLogin(pota_auth::browser_login(&cancel).map_err(|e| e.to_string()))));
+        if spawned.is_err() {
+            self.cred_checking = false;
+            self.cred_result = Some((false, "Could not start the sign-in".into()));
+        }
+    }
+
+    /// Stop waiting for the browser.
+    pub fn cancel_pota_sign_in(&mut self) {
+        self.pota_cancel.store(true, Ordering::Relaxed);
+    }
+
+    pub fn pota_signed_in(&self) -> bool {
+        !self.s.pota_refresh_token.is_empty()
+    }
+
+    /// Forget the saved pota.app sign-in.
+    pub fn pota_sign_out(&mut self) {
+        self.s.pota_user.clear();
+        self.s.pota_refresh_token.clear();
+        self.cred_result = None;
+        self.apply_pota_login(None, self.wizard.is_none());
     }
 
     pub fn start_cat_test(&mut self) {
@@ -1146,8 +1164,8 @@ impl App {
     // --- pota.app -------------------------------------------------------------------
 
     pub fn pota_summary(&self) -> String {
-        if self.s.pota_user.is_empty() {
-            return "Not signed in; add your login for hunt counts".into();
+        if !self.pota_signed_in() {
+            return "Not signed in; sign in for hunt counts".into();
         }
         if self.pota_status.is_empty() {
             format!("{}  ·  signing in", self.s.pota_user)
@@ -1156,16 +1174,26 @@ impl App {
         }
     }
 
-    pub fn apply_pota_login(&mut self, user: &str, password: &str, save: bool) {
-        let user = user.trim().to_string();
-        self.s.pota_user = user.clone();
-        self.s.pota_password = password.to_string();
+    /// Start (or stop) using the saved pota.app sign-in. `new` = tokens just obtained from
+    /// the browser (saved into the settings); None = use whatever is saved.
+    pub fn apply_pota_login(&mut self, new: Option<pota_auth::Tokens>, save: bool) {
+        let mut tokens = pota_auth::Tokens::from_refresh(&self.s.pota_refresh_token);
+        if let Some(t) = new {
+            if let Some(r) = &t.refresh_token {
+                self.s.pota_refresh_token = r.clone();
+            }
+            let who = pota_auth::account_of(&t.id_token);
+            if !who.is_empty() {
+                self.s.pota_user = who;
+            }
+            tokens = Some(t);
+        }
         *self.counts.borrow_mut() = None;
         self.spots_key = None;
         self.pota_failed = false;
-        self.pota_status = if !user.is_empty() && !password.is_empty() { format!("Signing in as {user}") } else { String::new() };
+        self.pota_status = if self.pota_signed_in() { format!("Signing in as {}", self.s.pota_user) } else { String::new() };
         if let Some(s) = &self.stats {
-            s.configure(&user, password);
+            s.configure(if self.pota_signed_in() { tokens } else { None });
         }
         if save {
             self.save_settings();
@@ -1312,12 +1340,16 @@ impl App {
                     self.log(&format!("Could not switch WSJT-X's {what} to {value} ({result}); change it in WSJT-X"), Tag::Error);
                 }
             }
-            Event::PotaCheck(r) => {
+            Event::PotaLogin(r) => {
                 self.cred_checking = false;
-                self.cred_result = Some(match r {
-                    Ok(()) => (true, "Signed in to pota.app: these credentials work".into()),
-                    Err(e) => (false, format!("Sign-in failed: {e}")),
-                });
+                match r {
+                    Ok(Some(t)) => {
+                        self.apply_pota_login(Some(t), self.wizard.is_none()); // the wizard saves at Finish
+                        self.cred_result = Some((true, format!("Signed in{}", if self.s.pota_user.is_empty() { String::new() } else { format!(" as {}", self.s.pota_user) })));
+                    }
+                    Ok(None) => self.cred_result = None,
+                    Err(e) => self.cred_result = Some((false, format!("Sign-in failed: {e}"))),
+                }
             }
             Event::UpdateCheck(r, manual) => {
                 self.update_busy = false;
@@ -2789,12 +2821,12 @@ impl App {
             let text = format!("CAT: {}", self.static_rig);
             info.push(StaticLine::new(self.stamp("cat", &text), text));
         }
-        let logged_in = !self.s.pota_user.is_empty() && !self.s.pota_password.is_empty();
+        let logged_in = self.pota_signed_in();
         let counts = self.counts.borrow().clone();
         if !logged_in {
-            let text = "pota.app: not signed in. Your login is needed to show which parks are new to you, how many times you've hunted each park, and how many times you've worked each activator.";
+            let text = "pota.app: not signed in. Signing in is needed to show which parks are new to you, how many times you've hunted each park, and how many times you've worked each activator.";
             info.push(StaticLine::new(self.stamp("pota-notice", text), text.to_string()));
-            info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Add your pota.app login in Settings".into()) });
+            info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Sign in to pota.app in Settings".into()) });
         } else if let Some(c) = counts.as_ref() {
             let now = epoch_now();
             let next = match self.stats.as_ref().and_then(|s| s.next_fetch()) {
@@ -2814,7 +2846,7 @@ impl App {
             let ts = self.stamp("pota-status", &text);
             info.push(StaticLine { bad: self.pota_failed, ..StaticLine::new(ts, format!("pota.app: {text}")) });
             if self.pota_status.starts_with("Sign-in failed") {
-                info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Check your pota.app login in Settings".into()) });
+                info.push(StaticLine { link: true, ..StaticLine::new(String::new(), "Sign in to pota.app again in Settings".into()) });
             }
         }
         let avail = (card_w - 2.0 - PAD - (PAD + 2.0 + 10.0 * measure(&f.mono, "0"))).max(60.0);
@@ -4016,7 +4048,7 @@ impl eframe::App for App {
             }
             // the wizard's Test CAT Control posts its result; nothing else is running yet
             while let Ok(e) = self.rx.try_recv() {
-                if let Event::CatTest(..) | Event::PotaCheck(..) = e {
+                if let Event::CatTest(..) | Event::PotaLogin(..) = e {
                     self.dispatch(e, &ctx);
                 }
             }

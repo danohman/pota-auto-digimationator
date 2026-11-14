@@ -26,8 +26,9 @@ pub enum Event {
     CqTx(String),
     /// result of the Radio tab's "Test CAT Control": (all passed, lines)
     CatTest(bool, Vec<String>),
-    /// result of "Check credentials" on a pota.app sign-in page: Ok, or why it failed
-    PotaCheck(Result<(), String>),
+    /// result of "Sign in" through the browser on a pota.app page: the tokens, None when
+    /// cancelled, or why it failed
+    PotaLogin(Result<Option<crate::pota_auth::Tokens>, String>),
     /// result of the update check: a newer release, none, or why it failed; the bool is
     /// true when the user asked for the check (so "up to date" is worth saying)
     UpdateCheck(Result<Option<crate::update::Release>, String>, bool),

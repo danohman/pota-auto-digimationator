@@ -125,7 +125,7 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             para("The new graphics backend is used the next time the program starts. Restart now closes the app normally (the radio is put back as it was) and opens it again.", &f.ui, p.text, 8.0),
         ]),
         DialogKind::ResetSettings => ("Reset settings".into(), "Reset all settings to their defaults?".into(), p.bad, vec![
-            para("Every setting goes back to its default: radio and logging choices, your pota.app login, sounds, window layout and text size. This cannot be undone.", &f.ui, p.text, 8.0),
+            para("Every setting goes back to its default: radio and logging choices, your pota.app sign-in, sounds, window layout and text size. This cannot be undone.", &f.ui, p.text, 8.0),
             para("Today's worked list and your logs are not touched. The app restarts to apply the defaults.", &f.ui, p.text, 8.0),
         ]),
         DialogKind::CheckFailed(e) => ("Update check failed".into(), "Couldn't check for updates".into(), p.bad, vec![
