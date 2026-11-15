@@ -6,7 +6,7 @@ POTA Auto-Digimationator watches WSJT-X decodes over UDP and calls POTA activato
 
 It was developed and tested using [WSJT-X Improved](https://ws-suite.sourceforge.io/). Stock WSJT-X is supported too.
 
-**You stay the control operator.** Fully automated QSOs are prohibited. The program only helps you call stations: it asks you to confirm that you're at your station every time you turn an Auto mode on, and it checks that you're still there every 10 minutes (see [Safety](#safety)).
+**You stay the control operator.** Fully automated QSOs are prohibited. The program only helps you call stations: it asks you to confirm that you're at your station every time you turn an Auto mode on, and it checks that you're still there after every completed QSO (see [Safety](#safety)).
 
 **FULLY AUTOMATED QSOs ARE PROHIBITED BY PARKS ON THE AIR** ([POTA rules](https://docs.pota.app/docs/rules.html))
 
@@ -199,7 +199,7 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 
 - It starts with Auto-Hunt disabled and Dry run on.
 - Turning Auto-Hunt or Auto CQ/Answer on always asks you to confirm that you're at your station, even in Dry run.
-- While either is on, it asks **"Are you still there?"** every 10 minutes (any click or key press in the program restarts that clock). If you don't answer within a minute, both modes switch off. A QSO already in progress is left alone.
+- While either is on, it asks **"Are you still there?"** after every completed QSO. If you don't answer within a minute, both modes switch off. A QSO already in progress is left alone.
 
 ## Files
 

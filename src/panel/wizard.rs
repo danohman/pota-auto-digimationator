@@ -8,7 +8,7 @@
 use eframe::egui::{self, Color32, Id, Key, Order, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, UiBuilder, Vec2};
 
 use super::{choose_sound_file, stepper_labels_attempts, stepper_labels_power, stepper_labels_snr, Do, Panel, CQ_CHOICES, L, NO_SNR_LIMIT};
-use crate::app::{App, ATTEMPT_MODES, PRESENCE_SECONDS};
+use crate::app::{App, ATTEMPT_MODES};
 use crate::cat;
 use crate::respot;
 use crate::settings::Settings;
@@ -456,7 +456,7 @@ impl Wizard {
                 bullet(l, "Optional: a Yaesu FTDX101D, Kenwood TS-590S/SG/TS-890S Elecraft, Icom or Xiegu radio controlled over its COM port, for the receiver and power settings.");
                 l.y += 4.0;
                 l.section("You stay in control");
-                lead(l, &format!("Amateur radio rules require a control operator at the station, so fully automatic, unattended operation is not allowed. To keep it that way the program starts with Auto-Hunt and Auto CQ/Answer switched off, asks you to confirm every time you turn one on, and asks \"Are you still there?\" every {} minutes while either is on. If you do not answer, it switches itself off.", (PRESENCE_SECONDS / 60.0) as u32));
+                lead(l, "Amateur radio rules require a control operator at the station, so fully automatic, unattended operation is not allowed. To keep it that way the program starts with Auto-Hunt and Auto CQ/Answer switched off, asks you to confirm every time you turn one on, and asks \"Are you still there?\" after every completed QSO while either is on. If you do not answer, it switches itself off.");
             }
             Step::Look => {
                 l.section("Theme");
