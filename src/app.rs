@@ -325,6 +325,7 @@ pub struct App {
     /// newest spot time seen per new-parks line (band, mode), and until when each pulses
     notice_seen: HashMap<(String, String), String>,
     notice_pulse: HashMap<(String, String), f64>,
+    notice_tuned: Option<(Option<String>, String)>,
     /// (base call, band) -> `now()` of the last decode sent by that station
     last_heard: HashMap<(String, String), (f64, u32, i32)>,
     /// last band WSJT-X reported; kept while the dial is between bands (mid-retune)
@@ -614,6 +615,7 @@ impl App {
             hidden_heard: None,
             notice_seen: HashMap::new(),
             notice_pulse: HashMap::new(),
+            notice_tuned: None,
             last_heard: HashMap::new(),
             heard_band: std::cell::Cell::new(None),
             decode_until: 0.0,
@@ -1939,11 +1941,19 @@ impl App {
         self.notices = if self.h.band().is_some() { self.h.new_parks_elsewhere() } else { vec![] };
         // a line pulses when it is new, or its newest spot got newer (a lower age)
         let until = self.now() + HEARD_SECONDS;
+        // A band/mode change reshuffles the lines (the old band appears, the new one goes
+        // away): remember them all without pulsing, so the card doesn't flash.
+        let tuned = (self.h.band().map(str::to_string), self.h.mode());
+        let retuned = self.notice_tuned.as_ref().is_some_and(|t| t.0.is_some() && *t != tuned);
+        self.notice_tuned = Some(tuned);
+        if retuned {
+            self.notice_pulse.clear();
+        }
         for (band, mode, _, newest) in &self.notices {
             let key = (band.clone(), mode.clone());
             if self.notice_seen.get(&key).is_none_or(|old| newest > old) {
                 self.notice_seen.insert(key.clone(), newest.clone());
-                if self.notice_kind(band, mode) != NoticeKind::Plain {
+                if !retuned && self.notice_kind(band, mode) != NoticeKind::Plain {
                     self.notice_pulse.insert(key, until);
                 }
             }
