@@ -3149,7 +3149,8 @@ impl App {
                     .iter()
                     .map(|(s, atno)| {
                         let tag = if *atno { "ATNO \u{2022} " } else if (self.h.park_is_new)(&s.reference) { "NEW \u{2022} " } else { "" };
-                        format!("{}{} ago \u{2022} {} \u{2022} {} ({})", tag, ago(&s.spot_time, now), s.activator, s.reference, s.park_name)
+                        let prog = if s.program().is_empty() { String::new() } else { format!(" [{}]", crate::programs::short_name(s.program()).unwrap_or(s.program())) };
+                        format!("{}{} ago \u{2022} {} \u{2022} {} ({}){}", tag, ago(&s.spot_time, now), s.activator, s.reference, s.park_name, prog)
                     })
                     .collect();
                 if !lines.is_empty() {

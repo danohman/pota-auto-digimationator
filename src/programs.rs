@@ -4276,6 +4276,17 @@ pub fn name(prefix: &str) -> Option<&'static str> {
     PROGRAMS.binary_search_by_key(&prefix, |(p, _)| p).ok().map(|i| PROGRAMS[i].1)
 }
 
+/// The name of a program for the spots' hover text: `name`, with "United States of America"
+/// shortened to "USA" and "United Kingdom of Great Britain and Northern Ireland" to "UK"
+/// (user request 2026-11-15).
+pub fn short_name(prefix: &str) -> Option<&'static str> {
+    name(prefix).map(|n| match n {
+        "United States of America" => "USA",
+        "United Kingdom of Great Britain and Northern Ireland" => "UK",
+        _ => n,
+    })
+}
+
 /// The name of a location by its code ("US-GA" is "Georgia"). Two regions sharing a code
 /// are joined with " / ".
 pub fn location_name(code: &str) -> Option<String> {
@@ -4289,7 +4300,7 @@ pub fn location_name(code: &str) -> Option<String> {
 /// twice.
 pub fn describe_location(code: &str) -> String {
     let place = location_name(code);
-    let country = code.split_once('-').and_then(|(p, _)| name(p));
+    let country = code.split_once('-').and_then(|(p, _)| short_name(p));
     let mut names: Vec<&str> = [place.as_deref(), country].into_iter().flatten().collect();
     names.dedup();
     if names.is_empty() { code.to_string() } else { format!("{code} ({})", names.join("; ")) }
@@ -4319,20 +4330,20 @@ mod tests {
 
     #[test]
     fn locations() {
-        assert_eq!(describe_location("US-GA"), "US-GA (Georgia; United States of America)");
-        assert_eq!(describe_location("US-AK"), "US-AK (Alaska; United States of America)");
+        assert_eq!(describe_location("US-GA"), "US-GA (Georgia; USA)");
+        assert_eq!(describe_location("US-AK"), "US-AK (Alaska; USA)");
         assert_eq!(describe_location("VA-VA"), "VA-VA (Vatican City; Vatican)");
         assert_eq!(describe_location("PH-CV"), "PH-CV (Cagayan Valley / Central Visayas; Philippines)");
-        assert_eq!(describe_location("US-ZZ"), "US-ZZ (United States of America)");
+        assert_eq!(describe_location("US-ZZ"), "US-ZZ (USA)");
         assert_eq!(describe_location("XX-1"), "XX-1");
     }
 
     #[test]
     fn tips() {
-        assert_eq!(location_tip("US-GA"), "Park Location: US-GA (Georgia; United States of America)");
+        assert_eq!(location_tip("US-GA"), "Park Location: US-GA (Georgia; USA)");
         assert_eq!(
             location_tip("US-NC, US-VA"),
-            "Park Locations:\nUS-NC (North Carolina; United States of America)\nUS-VA (Virginia; United States of America)"
+            "Park Locations:\nUS-NC (North Carolina; USA)\nUS-VA (Virginia; USA)"
         );
         assert_eq!(location_tip(""), "");
     }
