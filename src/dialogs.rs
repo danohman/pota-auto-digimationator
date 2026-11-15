@@ -93,7 +93,7 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
             ])
         }
         DialogKind::PresenceAsk => ("Are you still there?".into(), "Are you still there?".into(), p.warn, vec![
-            para("As the control operator you must be present and in control of your station whenever it is transmitting. Fully automated QSOs are prohibited, so the Auto modes check from time to time that somebody is really operating.", &f.ui, p.text, 8.0),
+            para("As the control operator you must be present and in control of your station whenever it is transmitting. Fully automated QSOs are prohibited, so the Auto modes check after every completed QSO that somebody is really operating.", &f.ui, p.text, 8.0),
             para("Confirm below, or Auto-Hunt and Auto CQ/Answer will be switched off when the countdown ends.", &f.ui, p.text, 8.0),
         ]),
         DialogKind::CatResult(ok, lines) => {
@@ -133,7 +133,7 @@ fn content(kind: &DialogKind, p: &Palette, f: &Fonts, dry: bool) -> (String, Str
         ]),
         DialogKind::PresenceExpired(names) => ("Auto modes disabled".into(), format!("{names} switched off"), p.bad, vec![
             para("You did not confirm that you were at the station in time. Fully automated QSOs are prohibited, so the Auto modes are switched off whenever nobody answers.", &f.ui, p.text, 8.0),
-            para("Calls already in progress in WSJT-X are left alone. You can switch the Auto modes back on yourself; that starts a fresh timer.", &f.ui, p.text, 8.0),
+            para("Calls already in progress in WSJT-X are left alone. You can switch the Auto modes back on yourself.", &f.ui, p.text, 8.0),
         ]),
     }
 }

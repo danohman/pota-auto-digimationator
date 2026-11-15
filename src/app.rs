@@ -46,9 +46,8 @@ pub const HEARD_SECONDS: f64 = 3.0;
 pub const HEARD_PERIOD: f64 = 0.6;
 pub const GLOW_PERIOD: f64 = 1.6;
 pub const ATTEMPT_MODES: [&str; 3] = ["FT8", "FT4", "FT2"];
-/// "Are you still there?" is asked after this long without activity (10 minutes)
-pub const PRESENCE_SECONDS: f64 = 600.0;
-/// the time to answer; the Auto modes switch off when it runs out
+/// "Are you still there?" is asked after every logged QSO while an Auto mode is on; this is
+/// the time to answer, and the Auto modes switch off when it runs out
 pub const PRESENCE_WARN: f64 = 60.0;
 /// older spots get a faint red Ago cell
 pub const STALE_MINUTES: i64 = 10;
@@ -620,7 +619,7 @@ impl App {
             decode_until: 0.0,
             radio: None,
             periods: PeriodDetector::default(),
-            presence: PresenceTimer::new(PRESENCE_SECONDS + PRESENCE_WARN, PRESENCE_WARN, Box::new(mono_clock(t0))),
+            presence: PresenceTimer::new(PRESENCE_WARN, PRESENCE_WARN, Box::new(mono_clock(t0))),
             presence_off: false,
             typed: vec![],
             state_ready: false,
@@ -857,7 +856,7 @@ impl App {
                     _ => {}
                 },
                 dialogs::Outcome::StillHere => {
-                    self.presence.arm();
+                    self.presence.disarm();
                     self.log("Presence confirmed; Auto modes stay on.", Tag::Hunt);
                 }
                 dialogs::Outcome::Expired => self.presence_expired(),
@@ -1291,6 +1290,7 @@ impl App {
                     }
                     Message::QsoLogged(q) => {
                         let entry = self.h.handle_qso_logged(&q);
+                        self.presence_after_qso();
                         if self.s.ding {
                             sound::play(sound::Kind::Ding, &self.s.ding_path);
                         }
@@ -1826,14 +1826,11 @@ impl App {
 
     // --- "Are you still there?" ------------------------------------------------------
 
-    /// Keep the timer in step with the Auto modes: enabling one starts a fresh countdown;
-    /// with both off it stops.
-    fn presence_sync(&mut self, enabling: bool) {
-        if self.h.enabled || self.h.cq_enabled {
-            if enabling {
-                self.presence.arm();
-            }
-        } else {
+    /// Keep the question in step with the Auto modes: with both off it goes away. Enabling
+    /// one asks nothing (the enable confirmation already did); the question comes after each
+    /// logged QSO (`presence_after_qso`).
+    fn presence_sync(&mut self, _enabling: bool) {
+        if !(self.h.enabled || self.h.cq_enabled) {
             self.presence.disarm();
             if self.dialog.as_ref().is_some_and(|d| d.kind.is_presence()) {
                 self.dialog = None;
@@ -1841,9 +1838,9 @@ impl App {
         }
     }
 
-    /// Restart the presence timer (only while it isn't already asking).
-    fn activity(&mut self) {
-        if self.presence.phase() == Some(Phase::Ok) {
+    /// A QSO was logged: while an Auto mode is on, ask "Are you still there?" now.
+    fn presence_after_qso(&mut self) {
+        if (self.h.enabled || self.h.cq_enabled) && self.presence.phase().is_none() {
             self.presence.arm();
         }
     }
@@ -1861,15 +1858,14 @@ impl App {
         if self.typed.len() == 6 && hash == 0x24ac_adea_4102_5e28 && now - self.typed[0].0 <= 1.0 {
             self.typed.clear(); // a repeat needs the whole word again
             if self.presence_off {
-                self.log("Konami! Presence checking is already disabled until the application is restarted.", Tag::Hunt);
                 return;
             }
             self.presence_off = true;
             if self.dialog.as_ref().is_some_and(|d| d.kind == DialogKind::PresenceAsk) {
                 self.dialog = None;
-                self.presence.arm();
+                self.presence.disarm();
             }
-            self.log("Konami! Presence checking has been disabled until the application is restarted.", Tag::Hunt);
+            self.log("KONAMI!", Tag::Hunt);
         }
     }
 
@@ -1877,8 +1873,7 @@ impl App {
         let phase = self.presence.phase();
         if self.presence_off {
             if matches!(phase, Some(Phase::Ask) | Some(Phase::Expired)) {
-                self.log("Konami! Presence detection is disabled, you would have been caught!", Tag::Hunt);
-                self.presence.arm();
+                self.presence.disarm();
             }
             return;
         }
@@ -2279,9 +2274,7 @@ impl App {
             }
             self.last_geometry = Some(o);
         }
-        if active {
-            self.activity();
-        }
+        let _ = active;
         if ctx.input(|i| i.modifiers.ctrl && i.key_pressed(Key::Comma)) && self.dialog.is_none() && self.wizard.is_none() {
             self.panel.toggle(self.now());
         }
@@ -3895,9 +3888,7 @@ impl App {
             if moved {
                 self.layout_due = Some(now + 0.5);
             }
-            if active {
-                self.activity();
-            }
+            let _ = active;
             for c in typed {
                 self.bypass_keys(c);
             }

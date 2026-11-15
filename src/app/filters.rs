@@ -287,9 +287,7 @@ impl App {
             self.s.hidden_programs.clear();
             self.settings_changed();
         }
-        if active {
-            self.activity();
-        }
+        let _ = active;
         for c in typed {
             self.bypass_keys(c);
         }
