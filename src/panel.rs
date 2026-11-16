@@ -31,6 +31,8 @@ fn onoff(v: bool, on: &'static str, off: &'static str) -> &'static str {
     }
 }
 const GPL_URL: &str = "https://www.gnu.org/licenses/gpl-3.0.html";
+const COFFEE_URL: &str = "https://buymeacoffee.com/wd4dan";
+const PAYPAL_URL: &str = "https://www.paypal.com/donate/?hosted_button_id=VAZPW6DYYRNAJ";
 
 /// Text styles of the About tab's selectable lines.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -122,6 +124,8 @@ pub struct Panel {
     /// the About tab's lines as last drawn, and the selection (line, char) anchor and focus
     about_lines: Vec<AboutLine>,
     about_sel: Option<((usize, usize), (usize, usize))>,
+    /// the Donate buttons' textures (Buy me a coffee, PayPal), loaded on first use
+    donate_tex: Option<[egui::TextureHandle; 2]>,
     /// opened by the POTA_DEMO test hook: don't close when the window isn't focused
     demo: bool,
     /// the other tabs' largest size and when it was measured (see `show`)
@@ -775,6 +779,10 @@ impl Panel {
         l.y += 6.0;
         self.about_text(l, "POTA Auto-Digimationator", AFont::UiBold, wrap, 0.0, 0.0, None);
         self.about_text(l, &format!("Version {}", env!("CARGO_PKG_VERSION")), AFont::SmallMuted, wrap, 0.0, 0.0, None);
+        l.section("Donate");
+        self.about_text(l, "If this program helps you, a donation is appreciated but never expected.", AFont::SmallMuted, wrap, 4.0, 2.0, None);
+        l.y += 4.0;
+        self.donate_buttons(l);
         l.section("Updates");
         let mut v = app.s.update_check;
         l.switch_row("Check for updates", onoff(v, "Looks at GitHub's latest release every few hours and offers it in Current Info", "Never looks for a new release"), &mut v, true, 0.0);
@@ -806,6 +814,41 @@ impl Panel {
         );
         self.about_text(l, "The full text is in the LICENSE file, and online at:", AFont::SmallMuted, wrap, 0.0, 0.0, None);
         self.about_text(l, GPL_URL, AFont::SmallLink, wrap, 0.0, 6.0, Some(GPL_URL));
+    }
+
+    /// The Buy me a coffee and PayPal images side by side; a click opens the donation page.
+    fn donate_buttons(&mut self, l: &mut L) {
+        // (RGBA data, size in pixels at 2x, link); drawn at half size
+        let imgs: [(&[u8], [usize; 2], &'static str); 2] = [
+            (include_bytes!("../assets/donate/bmc.rgba"), [285, 80], COFFEE_URL),
+            (include_bytes!("../assets/donate/paypal.rgba"), [113, 80], PAYPAL_URL),
+        ];
+        let h = 40.0;
+        if l.paint {
+            let ctx = l.ui.ctx().clone();
+            let tex = self.donate_tex.get_or_insert_with(|| {
+                let mk = |name: &str, (data, size, _): &(&[u8], [usize; 2], &str)| {
+                    ctx.load_texture(name, egui::ColorImage::from_rgba_unmultiplied(*size, data), egui::TextureOptions::LINEAR)
+                };
+                [mk("donate-coffee", &imgs[0]), mk("donate-paypal", &imgs[1])]
+            });
+            let mut x = l.left + 1.0;
+            for (i, (_, size, url)) in imgs.iter().enumerate() {
+                let w = size[0] as f32 / size[1] as f32 * h;
+                let rect = Rect::from_min_size(Pos2::new(x, l.y), Vec2::new(w, h));
+                let painter = l.painter();
+                painter.image(tex[i].id(), rect, Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+                let resp = l.ui.interact(rect, Id::unique(("donate", i)), Sense::click());
+                if resp.hovered() {
+                    l.ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+                }
+                if resp.clicked() {
+                    l.ui.ctx().open_url(egui::OpenUrl::new_tab(*url));
+                }
+                x += w + 14.0;
+            }
+        }
+        l.y += h + 8.0;
     }
 
     /// One selectable paragraph of the About tab: wrapped, recorded for the mouse
