@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "pota-auto-digimationator"
-version = "1.0.13"
+version = "1.0.14-beta"
 dependencies = [
  "base64",
  "chrono",
