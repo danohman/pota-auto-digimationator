@@ -8,6 +8,7 @@ mod loggers;
 mod app;
 mod cat;
 mod comports;
+mod crash;
 mod cycles;
 mod dialogs;
 mod events;
@@ -91,6 +92,7 @@ fn saved_geometry(s: &str) -> Option<(i32, i32, i32, i32)> {
 fn main() -> eframe::Result {
     update::cleanup();
     let dir = app_dir();
+    crash::install(&settings::data_dir(&dir));
     let s = settings::load(&settings::data_dir(&dir).join("settings.json"));
     let (fonts, defs) = Fonts::load(s.font_size as f32);
     let scale = unsafe { windows_sys::Win32::UI::HiDpi::GetDpiForSystem() } as f32 / 96.0;
@@ -158,6 +160,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| Ok(Box::new(App::new(cc, dir, (fonts, defs), channel, right_w)))),
     );
+    crash::clean_exit();
     update::relaunch_if_requested(); // after an update: the app has shut down, start the new exe
     result
 }

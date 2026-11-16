@@ -35,6 +35,7 @@ features = [
     "Win32_Media_Multimedia",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Kernel",
     "Win32_System_LibraryLoader",
     "Win32_System_ProcessStatus",
     "Win32_System_Registry",
@@ -52,3 +53,4 @@ winresource = "0.1"
 [profile.release]
 opt-level = 3
 lto = "thin"
+debug = "line-tables-only" # lets crash.log backtraces show source lines (the .pdb stays beside the exe)
