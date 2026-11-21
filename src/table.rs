@@ -90,6 +90,8 @@ pub enum ParkKind {
 #[derive(Clone, Default)]
 pub struct RowTags {
     pub worked: bool,
+    /// permanently ignored: gray row, faded text (links too)
+    pub ignored: bool,
     pub target: bool,
     pub pending: bool,
     pub heard: bool,
@@ -379,6 +381,8 @@ impl Table {
                     ParkKind::New => colors.heard_new,
                     ParkKind::Atno => colors.heard_atno,
                 })
+            } else if t.ignored {
+                Some(p.ignored_row)
             } else if t.worked {
                 Some(p.dim_row)
             } else if t.pending {
@@ -395,12 +399,20 @@ impl Table {
             let text_bg = bg.unwrap_or(p.surface);
             let base_fg = if t.unlogged {
                 p.bad
+            } else if t.ignored {
+                p.ignored_text
             } else if t.worked {
                 p.dim_text
             } else {
                 p.text
             };
-            let row_bg = if t.worked { p.dim_row } else { p.surface };
+            let row_bg = if t.ignored {
+                p.ignored_row
+            } else if t.worked {
+                p.dim_row
+            } else {
+                p.surface
+            };
             let (line_h, asc, shift) = self.line_metrics(f, row);
             let line_top = row_rect.top() + 3.0;
             let baseline = line_top + shift + asc;
@@ -465,7 +477,7 @@ impl Table {
                     let top = baseline + 2.0 - font.m.ascent;
                     x += ui::text_on(ui, &clip, Pos2::new(x, top), glyph, font, color, text_bg);
                 } else if let (Some(url), false) = (&c.link, c.text.is_empty()) {
-                    let w = ui::text_on(ui, &clip, Pos2::new(x, text_top(&f.ui)), &c.text, &f.ui, p.link, text_bg);
+                    let w = ui::text_on(ui, &clip, Pos2::new(x, text_top(&f.ui)), &c.text, &f.ui, if t.ignored { p.ignored_text } else { p.link }, text_bg);
                     let rr = Rect::from_min_size(Pos2::new(x, line_top), Vec2::new(w, line_h));
                     if hover_ok && pointer.is_some_and(|pp| rr.contains(pp)) {
                         hand = true;
@@ -484,7 +496,7 @@ impl Table {
                 }
                 if let Some((s, tip)) = &c.suffix {
                     x += space;
-                    let w = ui::text_on(ui, &clip, Pos2::new(x, text_top(&f.table_heading)), s, &f.table_heading, p.muted, text_bg);
+                    let w = ui::text_on(ui, &clip, Pos2::new(x, text_top(&f.table_heading)), s, &f.table_heading, if t.ignored { p.ignored_text } else { p.muted }, text_bg);
                     if let Some(tip) = tip {
                         let rr = Rect::from_min_size(Pos2::new(x, line_top), Vec2::new(w, line_h));
                         let hovered = hover_ok && pointer.is_some_and(|pp| rr.contains(pp));

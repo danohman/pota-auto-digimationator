@@ -64,6 +64,9 @@ pub struct Palette {
     pub select: Color32,
     pub dim_row: Color32,
     pub dim_text: Color32,
+    /// row and text of a permanently ignored station (grayer and fainter than `dim_*`)
+    pub ignored_row: Color32,
+    pub ignored_text: Color32,
     pub glow: (Color32, Color32),
     pub heard: (Color32, Color32),
     /// the same pulse for a heard spot at a NEW park (orange) or an ATNO park (purple)
@@ -117,6 +120,8 @@ impl Palette {
             select: hex("#cfe3ff"),
             dim_row: hex("#eef0f3"),
             dim_text: hex("#8b94a3"),
+            ignored_row: hex("#dcdfe4"),
+            ignored_text: hex("#a9b0bb"),
             glow: (Color32::from_rgb(252, 208, 208), Color32::from_rgb(228, 84, 84)),
             heard: (Color32::from_rgb(214, 242, 222), Color32::from_rgb(120, 214, 150)),
             heard_new: (Color32::from_rgb(255, 240, 214), Color32::from_rgb(246, 152, 40)),
@@ -166,6 +171,8 @@ impl Palette {
             select: hex("#2c4a73"),
             dim_row: hex("#191c22"),
             dim_text: hex("#6a7382"),
+            ignored_row: hex("#2a2e36"),
+            ignored_text: hex("#555d6b"),
             glow: (Color32::from_rgb(72, 28, 28), Color32::from_rgb(150, 48, 48)),
             heard: (Color32::from_rgb(24, 62, 38), Color32::from_rgb(40, 130, 70)),
             heard_new: (Color32::from_rgb(62, 40, 18), Color32::from_rgb(140, 84, 20)),

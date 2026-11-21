@@ -151,7 +151,7 @@ impl HunterIo for AppIo {
 }
 
 #[derive(PartialEq, Clone)]
-struct SpotsKey(Option<u64>, Option<&'static str>, String, usize, usize, Option<String>, bool, Option<u64>, i64, bool);
+struct SpotsKey(Option<u64>, Option<&'static str>, String, usize, usize, Option<String>, bool, Option<u64>, i64, bool, usize);
 
 /// The sections that can be popped out into their own windows.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
@@ -1934,6 +1934,7 @@ impl App {
             counts.as_ref().map(|c| c.fetched_at.to_bits()),
             (epoch_now() / 60.0) as i64,
             h.new_parks_only,
+            h.ignored.len(),
         );
         if self.spots_key.as_ref() == Some(&key) {
             return;
@@ -1980,7 +1981,9 @@ impl App {
             .iter()
             .map(|s| {
                 let refs: Vec<String> = if s.reference.is_empty() { vec![] } else { vec![s.reference.clone()] };
-                let st = if self.h.is_worked(&s.activator, band, &mode, &refs) {
+                let st = if self.h.ignored.contains(&base_call(&s.activator)) {
+                    "Ignored"
+                } else if self.h.is_worked(&s.activator, band, &mode, &refs) {
                     "Worked"
                 } else if self.h.is_skipped(&base_call(&s.activator), band, &mode, &refs) {
                     "Skipped"
@@ -1996,7 +1999,7 @@ impl App {
         self.done_count = n_done.to_string();
         let mono = self.now();
         for (s, worked) in rows {
-            let mut tags = RowTags { worked: !worked.is_empty(), ..Default::default() };
+            let mut tags = RowTags { worked: !worked.is_empty(), ignored: worked == "Ignored", ..Default::default() };
             if target.as_deref() == Some(base_call(&s.activator).as_str()) {
                 if calling {
                     tags.target = true;
@@ -2035,6 +2038,8 @@ impl App {
             if dim {
                 let (text, fill, tip) = if worked == "Worked" {
                     ("W", p.ok, "Worked today on this band and mode,\nso it won't be called again")
+                } else if worked == "Ignored" {
+                    ("I", p.muted, "Permanently ignored on all bands and modes;\nright-click the row to stop ignoring")
                 } else {
                     ("S", p.warn, "You skipped or ignored this station;\nright-click the row to undo")
                 };
@@ -3473,6 +3478,7 @@ impl App {
             let status = match d.status.as_str() {
                 "Worked" => "Worked today",
                 "Skipped" => "Skipped today",
+                "Ignored" => "Permanently ignored",
                 _ => "",
             };
             let head = format!("{}  \u{b7}  {where_}{}", d.call, if status.is_empty() { String::new() } else { format!("  \u{b7}  {status}") });
