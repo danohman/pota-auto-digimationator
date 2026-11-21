@@ -11,6 +11,9 @@ use crate::ui::{self, measure};
 pub enum MenuCmd {
     Skip { call: String, ref_: String },
     Unskip { call: String, ref_: String },
+    /// ignore a call for good, on every band and mode
+    Ignore(String),
+    Unignore(String),
     Band(String),
     Mode(String),
     /// hide or show a program from the Programs menu, which stays open

@@ -455,6 +455,8 @@ pub struct Hunter {
     pub answer_callers: bool,
     /// "JA 20m FT8" keys (pota_spots::hide_key): programs hidden on that band and mode, hunting included
     pub hidden_programs: HashSet<String>,
+    /// base calls ignored for good on every band and mode (from settings)
+    pub ignored: HashSet<String>,
     /// also call a station that has just sent 73/RR73 to someone
     pub pounce_signoffs: bool,
 
@@ -553,6 +555,7 @@ impl Hunter {
             new_parks_only: false,
             answer_callers: false,
             hidden_programs: HashSet::new(),
+            ignored: HashSet::new(),
             pounce_signoffs: true,
             awaiting_log: None,
             status: None,
@@ -948,6 +951,9 @@ impl Hunter {
     /// with no park covers every park; with `refs` empty (park unknown) any skip of
     /// the station on this band and mode counts.
     pub fn is_skipped(&self, call: &str, band: &str, mode: &str, refs: &[String]) -> bool {
+        if self.ignored.contains(&base_call(call)) {
+            return true; // ignored for good, everywhere
+        }
         let keys: Vec<&SkipKey> =
             self.skipped.iter().filter(|k| k.0 == call && k.1 == band && k.2 == mode).collect();
         if keys.is_empty() {
@@ -967,6 +973,16 @@ impl Hunter {
             None => self.park_now(&call, Some(&band)).0,
         };
         self.skipped.insert((call.clone(), band.clone(), mode.clone(), ref_.clone()));
+        let halted = self.drop_call(&call);
+        let at = if ref_.is_empty() { String::new() } else { format!(" at {ref_}") };
+        self.log(format!("Skipped {call} on {band} {mode}{at} for the rest of the UTC day{halted}"), Tag::Skip);
+        self.worked_did_change();
+    }
+
+    /// Forget `call` as a pending or current target and halt Tx if it is who we are
+    /// calling; returns the text to append to the log line ("; Tx halted"...).
+    fn drop_call(&mut self, call: &str) -> String {
+        let call = call.to_string();
         self.pending.retain(|c| c.call != call);
         self.cooloff.remove(&call);
         let st = self.status.clone();
@@ -985,9 +1001,27 @@ impl Hunter {
                 Err(e) => format!("; could not halt Tx: {e}"),
             };
         }
-        let at = if ref_.is_empty() { String::new() } else { format!(" at {ref_}") };
-        self.log(format!("Skipped {call} on {band} {mode}{at} for the rest of the UTC day{halted}"), Tag::Skip);
-        self.worked_did_change();
+        halted
+    }
+
+    /// Ignore `call` for good on every band and mode (the app saves it in the
+    /// settings): a skip that never expires, so Tx is halted if needed.
+    pub fn ignore(&mut self, call: &str) {
+        let call = base_call(call);
+        if self.ignored.insert(call.clone()) {
+            let halted = self.drop_call(&call);
+            self.log(format!("Ignoring {call} permanently on all bands and modes{halted}"), Tag::Skip);
+            self.worked_did_change();
+        }
+    }
+
+    /// Stop ignoring `call`.
+    pub fn unignore(&mut self, call: &str) {
+        let call = base_call(call);
+        if self.ignored.remove(&call) {
+            self.log(format!("No longer ignoring {call}"), Tag::Info);
+            self.worked_did_change();
+        }
     }
 
     /// Take back a skip (the station is fair game again today).

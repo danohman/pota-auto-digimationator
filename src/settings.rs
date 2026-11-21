@@ -102,6 +102,9 @@ pub struct Settings {
     /// "JA 20m FT8" keys: programs hidden on that band and mode (lists, counts, hunting)
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hidden_programs: Vec<String>,
+    /// base calls ignored for good on every band and mode (right-click a spot row)
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub ignored_calls: Vec<String>,
     /// pota.app account name (shown only), for the hunt-count chips
     pub pota_user: String,
     /// the browser sign-in's refresh token; "" = signed out. (Older versions saved
@@ -167,6 +170,7 @@ impl Default for Settings {
             new_parks_only: false,
             answer_callers: false,
             hidden_programs: Vec::new(),
+            ignored_calls: Vec::new(),
             pota_user: String::new(),
             pota_refresh_token: String::new(),
             respot: true,
@@ -213,19 +217,47 @@ fn norm(p: &str) -> String {
     p.replace('/', "\\").trim_end_matches('\\').to_lowercase()
 }
 
-/// The folder for the files the app writes (settings, state, spot cache), `data` under
-/// the app folder. Created if missing, and files left in the app folder by older
-/// versions are moved in.
+/// The folder for the files the app writes (settings, state, spot cache, crash logs):
+/// `%APPDATA%\pota-auto-digimationator`, or `data` under the app folder when
+/// `POTA_APP_DIR` is set (testing) or there is no %APPDATA%. Created if missing. The
+/// first time the AppData folder is used, the files of older versions are copied in
+/// from `<app folder>\data` (or the app folder itself); the old copies are left alone.
+/// Worked out once.
 pub fn data_dir(app_dir: &Path) -> PathBuf {
-    let data = app_dir.join("data");
-    let _ = std::fs::create_dir_all(&data);
-    for name in ["settings.json", "state.json", "spots_cache.json"] {
-        let (old, new) = (app_dir.join(name), data.join(name));
-        if old.is_file() && !new.exists() {
-            let _ = std::fs::rename(&old, &new);
+    static DIR: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    DIR.get_or_init(|| {
+        let old = app_dir.join("data");
+        let appdata = std::env::var_os("APPDATA").filter(|_| std::env::var_os("POTA_APP_DIR").is_none());
+        let data = match appdata {
+            Some(a) => PathBuf::from(a).join("pota-auto-digimationator"),
+            None => old.clone(),
+        };
+        let _ = std::fs::create_dir_all(&data);
+        if data != old {
+            for name in ["settings.json", "state.json", "spots_cache.json"] {
+                let new = data.join(name);
+                for from in [old.join(name), app_dir.join(name)] {
+                    if !from.is_file() {
+                        continue;
+                    }
+                    // an old file goes only once the AppData copy is there and the same size
+                    let same = |a: &Path, b: &Path| matches!((std::fs::metadata(a), std::fs::metadata(b)), (Ok(x), Ok(y)) if x.len() == y.len());
+                    if (!new.exists() && std::fs::copy(&from, &new).is_ok() && same(&from, &new))
+                        || (new.exists() && from.parent() == Some(old.as_path()) && same(&from, &new))
+                    {
+                        let _ = std::fs::remove_file(&from);
+                    }
+                }
+            }
+            // the old folder's leftovers, then the folder itself (only if nothing else is in it)
+            for name in ["crash.log", "crash.dmp", "running.flag", "state.json.tmp"] {
+                let _ = std::fs::remove_file(old.join(name));
+            }
+            let _ = std::fs::remove_dir(&old);
         }
-    }
-    data
+        data
+    })
+    .clone()
 }
 
 pub fn load(path: &Path) -> Settings {

@@ -716,6 +716,18 @@ fn skip_halts_a_manual_call_to_that_station() {
 }
 
 #[test]
+fn ignore_halts_and_covers_every_band_and_mode() {
+    let mut s = T::new();
+    s.hs(st_tx(true, false, "N5XYZ"));
+    s.h.ignore("N5XYZ/P");
+    assert_eq!(s.halts(), ["WSJT-X"]);
+    assert!(s.h.is_skipped("N5XYZ", "40m", "FT4", &[]));
+    assert!(s.h.is_skipped("N5XYZ", "20m", "FT8", &["US-1234".to_string()]));
+    s.h.unignore("N5XYZ");
+    assert!(!s.h.is_skipped("N5XYZ", "40m", "FT4", &[]));
+}
+
+#[test]
 fn one_shot_signoff_reply_is_repeated_up_to_the_attempt_limit() {
     let mut s = T::new();
     s.h.set_max_attempts(3);

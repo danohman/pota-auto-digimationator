@@ -489,8 +489,8 @@ impl App {
         let ctx = cc.egui_ctx.clone();
         ctx.set_fonts(fonts.1);
         let f = fonts.0;
-        let s = settings::load(&dir.join("data").join("settings.json"));
-        settings::clean_file(&dir.join("data").join("settings.json"), &s);
+        let s = settings::load(&settings::data_dir(&dir).join("settings.json"));
+        settings::clean_file(&settings::data_dir(&dir).join("settings.json"), &s);
         let repaint = ctx.clone();
         let post: Post = Arc::new(move |e| {
             let _ = tx.send(e);
@@ -499,13 +499,13 @@ impl App {
         let gfx = cc.wgpu_render_state.as_ref().map(|rs| debug::graphics_rows(rs, &s.gpu)).unwrap_or_default();
         // First run: no settings.json yet. The setup wizard runs before anything is started
         // (no listener, no pota.app polling); `begin_operation` starts them afterwards.
-        let first_run = !dir.join("data").join("settings.json").exists();
+        let first_run = !settings::data_dir(&dir).join("settings.json").exists();
         let listener = Arc::new(Mutex::new(if first_run {
             wsjtx_udp::idle_listener(&s.udp_group, s.udp_port)
         } else {
             wsjtx_udp::start_listener(post.clone(), &s.udp_group, s.udp_port)
         }));
-        let poller = (!first_run).then(|| pota_spots::start_poller(post.clone(), dir.join("data").join("spots_cache.json")));
+        let poller = (!first_run).then(|| pota_spots::start_poller(post.clone(), settings::data_dir(&dir).join("spots_cache.json")));
         let stats = (!first_run).then(|| pota_auth::start_stats_poller(post.clone()));
         let aclog = AclogClient::new(post.clone(), &s.aclog_host, s.aclog_port);
         let rig = RigClient::new(post.clone());
@@ -530,6 +530,7 @@ impl App {
         h.default_attempts = s.max_attempts;
         h.attempts_by_mode = s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), *v)).collect();
         h.min_snr = s.min_snr;
+        h.ignored = s.ignored_calls.iter().cloned().collect();
         h.hidden_programs = s.hidden_programs.iter().filter(|k| k.split(' ').count() == 3).cloned().collect(); // (the spot cache is applied through set_spots)
         let counts: Rc<RefCell<Option<Arc<HuntCounts>>>> = Rc::new(RefCell::new(None));
         let c2 = counts.clone();
@@ -741,7 +742,7 @@ impl App {
         let new = wsjtx_udp::start_listener(self.post.clone(), &self.s.udp_group, self.s.udp_port);
         let old = std::mem::replace(&mut *self.listener.lock().unwrap(), new);
         old.stop();
-        self.poller = Some(pota_spots::start_poller(self.post.clone(), self.dir.join("data").join("spots_cache.json")));
+        self.poller = Some(pota_spots::start_poller(self.post.clone(), settings::data_dir(&self.dir).join("spots_cache.json")));
         self.stats = Some(pota_auth::start_stats_poller(self.post.clone()));
         self.settings_changed();
         self.start_data();
@@ -777,7 +778,7 @@ impl App {
     /// running app (re-run).
     pub fn wizard_apply(&mut self) -> Result<(), String> {
         if self.unsaved {
-            settings::save(&self.dir.join("data").join("settings.json"), &self.s).map_err(|e| format!("Could not save settings: {e}"))?;
+            settings::save(&settings::data_dir(&self.dir).join("settings.json"), &self.s).map_err(|e| format!("Could not save settings: {e}"))?;
             self.unsaved = false;
             return Ok(());
         }
@@ -817,7 +818,7 @@ impl App {
     /// Nothing may save over the file on the way out (`resetting`).
     fn reset_settings(&mut self, ctx: &egui::Context) {
         self.s = settings::Settings::default();
-        let path = self.dir.join("data").join("settings.json");
+        let path = settings::data_dir(&self.dir).join("settings.json");
         if let Err(e) = settings::save(&path, &self.s) {
             self.log(&format!("Could not reset settings: {e}"), Tag::Error);
             return;
@@ -1083,7 +1084,7 @@ impl App {
         if self.unsaved || self.resetting {
             return; // first run: settings.json is written when the wizard finishes
         }
-        if let Err(e) = settings::save(&self.dir.join("data").join("settings.json"), &self.s) {
+        if let Err(e) = settings::save(&settings::data_dir(&self.dir).join("settings.json"), &self.s) {
             self.log(&format!("Could not save settings: {e}"), Tag::Error);
         }
     }
@@ -1115,8 +1116,8 @@ impl App {
         if !self.state_ready {
             return;
         }
-        let path = self.dir.join("data").join("state.json");
-        let tmp = self.dir.join("data").join("state.json.tmp");
+        let path = settings::data_dir(&self.dir).join("state.json");
+        let tmp = settings::data_dir(&self.dir).join("state.json.tmp");
         let body = serde_json::to_string(&self.h.export_state()).unwrap_or_default();
         let result = (|| -> std::io::Result<()> {
             std::fs::write(&tmp, body)?;
@@ -1138,7 +1139,7 @@ impl App {
     }
 
     fn load_state(&mut self) {
-        if let Ok(text) = std::fs::read_to_string(self.dir.join("data").join("state.json")) {
+        if let Ok(text) = std::fs::read_to_string(settings::data_dir(&self.dir).join("state.json")) {
             if let Ok(v) = serde_json::from_str(&text) {
                 self.h.import_state(&v);
             }
@@ -2035,7 +2036,7 @@ impl App {
                 let (text, fill, tip) = if worked == "Worked" {
                     ("W", p.ok, "Worked today on this band and mode,\nso it won't be called again")
                 } else {
-                    ("S", p.warn, "You skipped this station today;\nright-click the row and choose Unskip to undo")
+                    ("S", p.warn, "You skipped or ignored this station;\nright-click the row to undo")
                 };
                 cells.push(Cell { chip: Some(Chip { text: text.into(), fill, fg: p.accent_text, tip: Some(tip.into()) }), ..Default::default() });
             }
@@ -3476,7 +3477,14 @@ impl App {
             };
             let head = format!("{}  \u{b7}  {where_}{}", d.call, if status.is_empty() { String::new() } else { format!("  \u{b7}  {status}") });
             // only the choice that applies: Skip, or Unskip when already skipped
-            let row = if d.skipped {
+            let ignored = self.h.ignored.contains(&name);
+            let row = if ignored {
+                Item::Row {
+                    label: format!("Stop ignoring {name}"),
+                    cmd: Some(MenuCmd::Unignore(d.call.clone())),
+                    subtitle: "Ignored on all bands and modes; allow calls to them again".into(),
+                }
+            } else if d.skipped {
                 Item::Row {
                     label: format!("Unskip {name}"),
                     cmd: Some(MenuCmd::Unskip { call: d.call.clone(), ref_: d.ref_.clone() }),
@@ -3490,6 +3498,13 @@ impl App {
                 }
             };
             let mut items = vec![Item::Heading(head), row];
+            if !ignored {
+                items.push(Item::Row {
+                    label: format!("Permanently ignore {name}"),
+                    cmd: Some(MenuCmd::Ignore(d.call.clone())),
+                    subtitle: "All bands and modes, every day, until you stop ignoring them".into(),
+                });
+            }
             let prog = pota_spots::program_of(&d.ref_);
             if !prog.is_empty() {
                 items.push(Item::Row {
@@ -3507,6 +3522,18 @@ impl App {
         match cmd {
             MenuCmd::Skip { call, ref_ } => self.h.skip(&call, Some(&ref_)),
             MenuCmd::Unskip { call, ref_ } => self.h.unskip(&call, &ref_),
+            MenuCmd::Ignore(call) => {
+                self.h.ignore(&call);
+                self.s.ignored_calls = self.h.ignored.iter().cloned().collect();
+                self.s.ignored_calls.sort();
+                self.settings_changed();
+            }
+            MenuCmd::Unignore(call) => {
+                self.h.unignore(&call);
+                self.s.ignored_calls = self.h.ignored.iter().cloned().collect();
+                self.s.ignored_calls.sort();
+                self.settings_changed();
+            }
             MenuCmd::Band(b) => self.retune(Some(b), None),
             MenuCmd::Mode(m) => self.retune(None, Some(m)),
             MenuCmd::ToggleProgram(prog) => {
