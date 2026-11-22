@@ -1970,8 +1970,8 @@ impl App {
         let (Some(spots), Some(band)) = (self.h.spots.clone(), self.h.band()) else {
             self.spots_count = "0".into();
             self.done_count = "0".into();
-            self.spots_title = SPOTS_TITLE.into();
-            self.done_title = DONE_TITLE.into();
+            self.spots_title = format!("{SPOTS_TITLE} (max {}m old)", self.h.spot_max_age);
+            self.done_title = format!("{DONE_TITLE} (max {}m old)", self.h.spot_max_age);
             // waiting for WSJT-X has its own popup (the big spinner in the Activity card); the list only waits
             // for pota.app
             self.waiting = (if self.h.spots.is_none() { "Waiting for pota.app...".into() } else { String::new() }, true);
@@ -2084,8 +2084,8 @@ impl App {
         self.spots_tree.fit_columns(&self.f);
         self.done_tree.fit_columns(&self.f);
         self.spots_count = (list.len() - n_done).to_string(); // the rest are in the other card
-        self.spots_title = format!("{SPOTS_TITLE} ({band} {mode})");
-        self.done_title = format!("{DONE_TITLE} ({band} {mode})");
+        self.spots_title = format!("{SPOTS_TITLE} ({band} {mode}) (max {}m old)", self.h.spot_max_age);
+        self.done_title = format!("{DONE_TITLE} ({band} {mode}) (max {}m old)", self.h.spot_max_age);
     }
 
     /// (suffix, lead): "(n)" after a call you've hunted before; before the park an
