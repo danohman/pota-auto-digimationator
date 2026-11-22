@@ -14,6 +14,10 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 
 **As the control operator, you are required to be present and in control of your station whenever it is transmitting. Stay at the radio, watch what it does, and turn it off if anything looks wrong.**
 
+<p align="center"><img src="assets/screenshots/main-light.png" alt="The main window in light mode" width="100%"></p>
+
+*The screenshots in this file show live pota.app spots and a simulated WSJT-X feed, with Auto-Hunt in Dry run (it logs what it would call and transmits nothing).*
+
 ## Contents
 
 - [Getting started](#getting-started)
@@ -33,6 +37,12 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 ## Getting started
 
 The first time it runs (no `settings.json` in %APPDATA%\pota-auto-digimationator yet) a setup wizard walks you through every setting (13 pages, including your radio and its COM port), explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
+
+<p align="center">
+<img src="assets/screenshots/wizard-welcome.png" alt="Setup wizard, welcome page" width="32%">
+<img src="assets/screenshots/wizard-hunting.png" alt="Setup wizard, hunting page (dark)" width="32%">
+<img src="assets/screenshots/wizard-review.png" alt="Setup wizard, review page (dark)" width="32%">
+</p>
 
 ### 1. Set up WSJT-X
 
@@ -56,7 +66,14 @@ It opens with **Auto-Hunt Disabled** (red button) and **Dry run** on.
 1. Click the button and confirm you're at your station. It turns green (**Auto-Hunt Enabled (Dry run)**) and logs what it *would* call, without transmitting.
 2. When you're happy with what it picks, turn **Settings > Hunting > Dry run** off to let it transmit.
 
-All options are in the **Settings** panel (gear button at the top right, or Ctrl+,). Every change is saved at once.
+All options are in the **Settings** panel (gear button at the top right, or Ctrl+,). Every change is saved at once. It has seven tabs: **Hunting** (Dry run, Give up after, Skip stations weaker than, POTA spot max age, Only hunt new parks, Call stations after their 73, Answer stations that call me, Move Tx, and the Auto CQ/Answer message), **Radio**, **Logging**, **Connections** (WSJT-X setup, your pota.app account and respotting), **Appearance**, **Reset** (puts every setting back to its default after you confirm; your worked list and logs are kept) and **About**.
+
+<p align="center">
+<img src="assets/screenshots/settings-hunting.png" alt="Settings, Hunting tab (light)" width="49%">
+<img src="assets/screenshots/settings-radio.png" alt="Settings, Radio tab (dark)" width="49%">
+<img src="assets/screenshots/settings-logging.png" alt="Settings, Logging tab (light)" width="49%">
+<img src="assets/screenshots/settings-connections.png" alt="Settings, Connections tab (dark)" width="49%">
+</p>
 
 ## The main window
 
@@ -75,9 +92,13 @@ From top to bottom: a header (app icon, title, the **Auto CQ/Answer** and **Auto
 | **Current POTA Spots (Worked/Skipped today)** | Spots you've already worked (green **W**) or skipped (amber **S**) |
 | **Worked today (date)** | Every QSO today (UTC), with a search box and a countdown to 0000Z |
 
-Hover a column heading for what it means. Right-click a spot row to Skip or Unskip it, or to hide its program on this band and mode. Click a call or park to open it on pota.app. You can select any text with the mouse and copy it with Ctrl+C.
+Hover a column heading for what it means, and click it to sort by it (click again to reverse; the sort is remembered). Right-click a spot row to Skip or Unskip it, to **Permanently ignore** the station, or to hide its program on this band and mode. Click a call or park to open it on pota.app; hover a park for its location (state and country). You can select any text with the mouse and copy it with Ctrl+C.
 
-**Spot rows.** The **Heard** column shows how long ago you last decoded a message from that station on this band. The **Hz** column shows the audio frequency of that decode in WSJT-X (- if not heard); FREQ is the activator's spotted frequency in kHz. **DIR** is the compass heading in degrees (true north) from your grid square, as WSJT-X reports it, to the park along the great circle (- until WSJT-X has reported your grid). When a spotted station is decoded, its row pulses green (orange if its park is NEW to you, purple for an ATNO). A spot older than 10 minutes gets its age in faint red. Stations whose latest comment says QRT are dropped, since they are off the air.
+<p align="center"><img src="assets/screenshots/spot-menu.png" alt="Right-clicking a spot row" width="100%"></p>
+
+**Permanently ignored stations.** **Permanently ignore** on a spot's menu stops the program from ever calling or answering that station, on every band and mode and every day, until you choose **Stop ignoring** on its menu. They stay in the Worked/Skipped list as a gray, faded row with an **I** chip.
+
+**Spot rows.** The **Heard** column shows how long ago you last decoded a message from that station on this band. The **Hz** column shows the audio frequency of that decode in WSJT-X (- if not heard); FREQ is the activator's spotted frequency in kHz. **DIR** is the compass heading in degrees (true north) from your grid square, as WSJT-X reports it, to the park along the great circle (- until WSJT-X has reported your grid). When a spotted station is decoded, its row pulses green (orange if its park is NEW to you, purple for an ATNO). A spot older than 10 minutes gets its age in faint red, and spots older than the **POTA spot max age** (30 minutes by default, see [What it skips](#what-it-skips)) are not shown at all. The spot lists' headings show the limit, for example "(max 30m old)". Stations whose latest comment says QRT are dropped, since they are off the air.
 
 **Hiding programs.** A program is the part of a park number before the dash: `US` for US-1234, `JA` for JA-116273. The **Program Filter** drop-down in the status row, right after the mode drop-down, lists every program spotted on the current band and mode with its name and number of current spots, for example `AL (Albania) [12 current spots]`. Each has a checkbox: uncheck it to hide that program, and the list stays open so you can change several. Hiding applies only to **the band and mode WSJT-X is on** (JA can be hidden on 20m FT8 and still show on 40m FT8). A hidden program disappears from both spot lists, the new-parks section and the spot counts, and Auto-Hunt will not call those stations, even if they send CQ POTA. The drop-down turns red and reads "Program Filter: 2 hidden" while any are hidden here, and **Show all programs** undoes it. You can also right-click a spot and choose **Hide all JA spots**. To see and change everything at once, choose **Manage all filters...** at the top of the drop-down: the **Program filters** window lists every band and mode on the left (with a red count of what is hidden there) and, for the one you pick, a checkbox for each program spotted on it, with **Show all** and **Hide all** buttons, **Clear all filters** at the bottom, and **Done** to close it. If a station you have hidden is decoded, the drop-down pulses green (orange for a NEW park, purple for ATNO) so you know it is there. When a list is empty because of the filter it says "Some programs hidden" in red. The choice is remembered between runs. A QSO already under way carries on.
 
@@ -97,7 +118,7 @@ Turn on **Settings > Hunting > Only hunt new parks** to restrict this to station
 ### What it skips
 
 - **Weak stations.** Nothing weaker than **-20 dB** is auto-called (change it under **Settings > Hunting > Skip stations weaker than**, -24 to -6 dB or No limit). Skipped stations still show in the log, with the reason.
-- **Spot age.** Spots older than **30 minutes** are left out of the Spots list and the new parks on other bands lines. Change it under **Settings > Hunting > POTA spot max age** (5 to 30 minutes, in 5 minute steps) or in the setup wizard.
+- **Old spots.** Spots older than **30 minutes** are left out of the two Spots lists and the "POTA Spots" lines for other bands and modes (the headings say "(max 30m old)"). Change it under **Settings > Hunting > POTA spot max age** (5 to 30 minutes, in 5 minute steps) or in the setup wizard. It affects only what those lists show; the spot counts in the pota.app chip are not age-filtered.
 - **Stations already worked today (UTC)** on the same band and mode **at the same park**. If an activator moves to a new park the same day, it calls them again. When the park isn't known, either for the earlier QSO (WSJT-X's own log doesn't record parks) or for where they are now (not spotted), it doesn't call them again on that band and mode until 0000Z.
 - **Stations you skipped.** Click **Skip** on a Candidate or CALLING line, or right-click the spot row and choose Skip. They won't be called again today on that band, mode and park, and Tx is halted if it was the station being called. Right-click a skipped spot to unskip it.
 
@@ -105,7 +126,7 @@ The worked list is loaded at startup from today's entries in WSJT-X's log (`wsjt
 
 ### How it picks and calls
 
-- When several candidates decode in the same cycle, it calls the one with the **strongest SNR**. If nothing is worth calling, the log shows one gray line such as `38 calls decoded, no needed POTA`.
+- When several candidates decode in the same cycle, it calls a station at a park that is **new to you** first (a purple ATNO counts as new too), and among those, or among the rest if none is new, the one with the **strongest SNR**. New parks are known only when you are [signed in to pota.app](#potaapp-spots-and-hunt-counts); without that it simply picks the strongest. If nothing is worth calling, the log shows one gray line such as `38 calls decoded, no needed POTA`.
 - It **never calls while WSJT-X has Tx enabled**, so it won't interrupt a QSO or your own CQ. A QSO in progress is never overridden.
 - You can always call a candidate yourself with its **Call now** button, even with Auto-Hunt disabled or in Dry run.
 - Each call is sent as a Reply, exactly as a double-click on the decode line would.
@@ -141,7 +162,7 @@ WSJT-X pops up its Log QSO window after each QSO and only logs it (and tells thi
 
 - When a QSO finishes (RR73 / RRR / 73 exchanged), the station is marked worked straight away. It won't be called again on that band and mode even if the QSO never gets logged. The worked list shows a red cross in the Log column until WSJT-X logs it.
 - With **Settings > Logging > Press OK on WSJT-X's Log QSO window** on (the default), the program presses OK whenever that window opens, for any QSO. It sends Enter to the window directly, so it doesn't steal focus. If the window doesn't close after a few tries, the log says so and you can click it yourself. This works whether Auto-Hunt is enabled or disabled.
-- A sound plays whenever WSJT-X logs a QSO (**Settings > Logging**: on or off, test it, or choose your own file).
+- A sound plays whenever WSJT-X logs a QSO, and a second sound plays when a wanted park is ready to call (only NEW or ATNO parks when you hunt new parks only). Both are on **Settings > Logging**: on or off, a Test button, and Choose to use your own sound file.
 
 ### Log4OM, DXKeeper, HRD Logbook, N1MM Logger+, Logger32
 
@@ -163,6 +184,10 @@ If ACLog already gets QSOs straight from WSJT-X (ACLog's own WSJT-X link or JTAl
 - in front of the park, an orange **NEW** chip if you've never hunted it (a purple **ATNO** when the park has never had a qualifying activation), or the count in parentheses if you have
 
 The counts come from your pota.app account and refresh every 30 minutes, so today's QSOs appear after you upload your log. The program never sees your password. It keeps only a sign-in token in `settings.json` on this computer; if pota.app expires it (after a few weeks, perhaps), the Current Info card asks you to sign in again. Signing in uses port 8080 on this computer for a moment, so close anything else using that port first.
+
+### Respotting
+
+With **Settings > Connections > Respot to pota.app after each QSO** on (the default), each QSO WSJT-X logs also posts a spot for that activator on pota.app, the way you would by hand. It needs your pota.app sign-in and a park the program has confirmed, and in Dry run it only logs "would respot". The comment is a template you can edit under **Settings > Connections > Respot message**; the default is `{MODE}: S:{RST_SENT} / R:{RST_RCVD}`. These placeholders are filled in: `{RST_RCVD}` `{RST_SENT}` `{CALL}` `{PARK}` `{FREQ}` `{BAND}` `{MODE}` `{MY_CALL}` `{APP_VERSION}`.
 
 ## Radio (CAT) settings
 
@@ -187,9 +212,13 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 - **Font size**: **Settings > Appearance > Text size**, with − and + buttons. It changes the whole window at once.
 - **Graphics backend**: **Settings > Appearance > Graphics** chooses how the window is drawn: Automatic (the default), DirectX 12, Vulkan or OpenGL. Automatic picks a real graphics chip over a software renderer and tries OpenGL last. A change asks to restart the program and applies on the next start.
 - **Pop-out**: the button at the right end of each section's header moves that section into its own window. Drag it to another monitor if you like. Click the button again (or close the window) to put it back.
+
+<p align="center"><img src="assets/screenshots/popouts.png" alt="The Activity and Spots sections popped out into their own windows" width="100%"></p>
 - **Rearrange**: drag a section's header to move it above or below another section, in either column. Drag the dividers to resize.
 - **Updates**: the app checks GitHub for a newer release a few seconds after start and every few hours. When there is one, a blue "Version X is available, click to update now" button appears in Current Info. Clicking it downloads the new exe, checks it, installs it and restarts the app (it won't while a QSO or Auto mode is active). Turn the check off, or run it now, under **Settings > About**.
-- Window position and size, section order, sizes and pop-out windows are all remembered.
+- Window position and size, section order, sizes, pop-out windows and table sorting are all remembered.
+
+<p align="center"><img src="assets/screenshots/main-dark.png" alt="The main window in dark mode" width="100%"></p>
 
 ## Troubleshooting
 
@@ -204,7 +233,7 @@ The counts come from your pota.app account and refresh every 30 minutes, so toda
 
 ## Files
 
-`settings.json`, `state.json` and `spots_cache.json` live in a `data` folder in the exe's folder (a build inside `target\release` of the source tree uses the project root instead). The QSO-logged sound and the icon are built into the exe, so it runs on its own.
+`settings.json`, `state.json` (today's worked list and skips) and `spots_cache.json` live in `%APPDATA%\pota-auto-digimationator`, along with a crash report if the program ever fails. The sounds and the icon are built into the exe, so it runs on its own.
 
 ## Building
 
