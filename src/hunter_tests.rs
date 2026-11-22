@@ -341,7 +341,11 @@ fn new_parks_report_newest_new_park_spot() {
     ]), s.t.get()));
     s.h.new_parks_only = true;
     s.h.park_is_new = Box::new(|r| r != "US-5555");
+    s.h.spot_max_age = 1_000_000; // (the spot times are fixed, long past)
     assert_eq!(s.h.new_parks_elsewhere(), [("40m".into(), "FT8".into(), 1, "2026-10-25T02:40:00".into())]);
+    s.h.spot_max_age = 30;
+    assert!(s.h.new_parks_elsewhere().is_empty());
+    assert!(s.h.new_park_spots("40m", "FT8").is_empty());
 }
 
 #[test]
@@ -969,6 +973,14 @@ fn calls_strongest_eligible() {
               dec_at("CQ N5XYZ EM12", 3, 10_515_000),
               dec_at("CQ K9OTHER EN52", 15, 10_515_000)]);
     assert_eq!(s.replies(), ["CQ N5XYZ EM12"]);
+    assert_eq!(s.target_call().as_deref(), Some("N5XYZ"));
+}
+
+#[test]
+fn new_park_is_called_before_a_stronger_known_park() {
+    let mut s = T::new();
+    s.h.park_is_new = Box::new(|r| r == "US-1234");
+    s.cycle(&[dec_at("CQ POTA K1ABC FN42", 10, 10_515_000), dec_at("CQ N5XYZ EM12", -5, 10_515_000)]);
     assert_eq!(s.target_call().as_deref(), Some("N5XYZ"));
 }
 

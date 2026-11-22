@@ -97,6 +97,7 @@ Turn on **Settings > Hunting > Only hunt new parks** to restrict this to station
 ### What it skips
 
 - **Weak stations.** Nothing weaker than **-20 dB** is auto-called (change it under **Settings > Hunting > Skip stations weaker than**, -24 to -6 dB or No limit). Skipped stations still show in the log, with the reason.
+- **Spot age.** Spots older than **30 minutes** are left out of the Spots list and the new parks on other bands lines. Change it under **Settings > Hunting > POTA spot max age** (5 to 30 minutes, in 5 minute steps) or in the setup wizard.
 - **Stations already worked today (UTC)** on the same band and mode **at the same park**. If an activator moves to a new park the same day, it calls them again. When the park isn't known, either for the earlier QSO (WSJT-X's own log doesn't record parks) or for where they are now (not spotted), it doesn't call them again on that band and mode until 0000Z.
 - **Stations you skipped.** Click **Skip** on a Candidate or CALLING line, or right-click the spot row and choose Skip. They won't be called again today on that band, mode and park, and Tx is halted if it was the station being called. Right-click a skipped spot to unskip it.
 

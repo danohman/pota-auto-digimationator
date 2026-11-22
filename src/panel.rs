@@ -619,6 +619,13 @@ fn stepper_labels_power() -> (Vec<u32>, Vec<String>) {
     (v, labels)
 }
 
+/// 5 to 30 minutes in 5 minute steps.
+fn stepper_labels_age() -> (Vec<u32>, Vec<String>) {
+    let v: Vec<u32> = (5..=30).step_by(5).collect();
+    let labels = v.iter().map(|m| format!("{m} minutes")).collect();
+    (v, labels)
+}
+
 fn stepper_labels_snr(current: i32) -> (Vec<i32>, Vec<String>) {
     let mut v: Vec<i32> = (-24..=-6).step_by(2).collect();
     if current != NO_SNR_LIMIT && !v.contains(&current) {
@@ -979,6 +986,12 @@ impl Panel {
         let idx = vals.iter().position(|v| *v == cur).unwrap_or(0);
         if let Some(i) = l.stepper_row("Skip stations weaker than", "Auto-calls only; Answer still works", &labels, idx) {
             app.s.min_snr = if vals[i] == NO_SNR_LIMIT { None } else { Some(vals[i]) };
+            l.act.push(Do::Changed);
+        }
+        let (vals, labels) = stepper_labels_age();
+        let idx = vals.iter().position(|v| *v == app.s.spot_max_age).unwrap_or(vals.len() - 1);
+        if let Some(i) = l.stepper_row("POTA spot max age", "Older spots are hidden from the Spots and new parks lists", &labels, idx) {
+            app.s.spot_max_age = vals[i];
             l.act.push(Do::Changed);
         }
         let mut v = app.s.new_parks_only;

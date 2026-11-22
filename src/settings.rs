@@ -52,6 +52,8 @@ pub struct Settings {
     pub attempts_by_mode: BTreeMap<String, u32>,
     /// null = no limit
     pub min_snr: Option<i32>,
+    /// oldest pota.app spot (minutes) the Spots card and the new-parks card show: 5 to 30
+    pub spot_max_age: u32,
     pub move_tx: bool,
     pub auto_log: bool,
     pub cq_text: String,
@@ -142,6 +144,7 @@ impl Default for Settings {
             max_attempts: 4,
             attempts_by_mode: [("FT8", 5), ("FT4", 10), ("FT2", 20)].iter().map(|(k, v)| (k.to_string(), *v)).collect(),
             min_snr: Some(-20),
+            spot_max_age: 30,
             move_tx: false,
             auto_log: true,
             cq_text: "CQ".into(),

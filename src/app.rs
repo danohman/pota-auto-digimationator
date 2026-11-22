@@ -530,6 +530,7 @@ impl App {
         h.default_attempts = s.max_attempts;
         h.attempts_by_mode = s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), *v)).collect();
         h.min_snr = s.min_snr;
+        h.spot_max_age = s.spot_max_age.clamp(5, 30);
         h.ignored = s.ignored_calls.iter().cloned().collect();
         h.hidden_programs = s.hidden_programs.iter().filter(|k| k.split(' ').count() == 3).cloned().collect(); // (the spot cache is applied through set_spots)
         let counts: Rc<RefCell<Option<Arc<HuntCounts>>>> = Rc::new(RefCell::new(None));
@@ -1065,6 +1066,10 @@ impl App {
         h.cq_text = self.s.cq_text.clone();
         h.attempts_by_mode = self.s.attempts_by_mode.iter().map(|(k, v)| (k.clone(), (*v).max(1))).collect();
         h.min_snr = self.s.min_snr;
+        if h.spot_max_age != self.s.spot_max_age.clamp(5, 30) {
+            h.spot_max_age = self.s.spot_max_age.clamp(5, 30);
+            self.spots_key = None; // the lists drop the older spots
+        }
         self.s.hidden_programs.retain(|k| k.split(' ').count() == 3); // "JA 20m FT8"; drops older whole-program entries
         let hidden: HashSet<String> = self.s.hidden_programs.iter().cloned().collect();
         if hidden != h.hidden_programs {
@@ -1973,7 +1978,7 @@ impl App {
             return;
         };
         let mode = self.h.mode();
-        let list = spots.on(band, &mode);
+        let list: Vec<&pota_spots::Spot> = spots.on(band, &mode).into_iter().filter(|s| self.h.spot_fresh(s)).collect();
         let filtered = if self.hidden_here().is_empty() { "" } else { "\nSome programs hidden" }; // second line, red (list_overlay)
         self.waiting = if list.is_empty() { (format!("No spots found for {band} {mode}{filtered}"), false) } else { (String::new(), true) };
         let now = Utc::now();

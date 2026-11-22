@@ -448,6 +448,8 @@ pub struct Hunter {
     pub default_attempts: u32,
     /// don't auto-call decodes weaker than this (None = no limit)
     pub min_snr: Option<i32>,
+    /// oldest spot (minutes) the new-parks lines count; the Spots card applies it too
+    pub spot_max_age: u32,
     pub auto_log: bool,
     /// auto-hunt only parks pota.app says we never hunted (NEW)
     pub new_parks_only: bool,
@@ -551,6 +553,7 @@ impl Hunter {
             attempts_by_mode: HashMap::new(),
             default_attempts: 4,
             min_snr: Some(-20),
+            spot_max_age: 30,
             auto_log: true,
             new_parks_only: false,
             answer_callers: false,
@@ -660,6 +663,11 @@ impl Hunter {
         }
     }
 
+    /// The spot is no older than the "POTA spot max age" setting (an unreadable time counts as fresh).
+    pub fn spot_fresh(&self, sp: &Spot) -> bool {
+        crate::app::age_minutes(&sp.spot_time, Utc::now()).is_none_or(|m| m <= self.spot_max_age as i64)
+    }
+
     /// Parks spotted on other bands/modes than the current one that we haven't worked
     /// today (only those never hunted, by the pota.app counts, when `new_parks_only`), ignoring skipped spots, in
     /// band order, each with the spot_time of the newest spot at one of those new
@@ -678,6 +686,7 @@ impl Hunter {
             let Some(band) = sp.band else { continue };
             if r.is_empty()
                 || !is_digital(&sp.mode)
+                || !self.spot_fresh(sp)
                 || (Some(band) == here_band && sp.mode == here_mode)
                 || worked.contains(r)
                 || (self.new_parks_only && !(self.park_is_new)(r))
@@ -716,6 +725,7 @@ impl Hunter {
             if r.is_empty()
                 || sp.band != Some(band)
                 || sp.mode != mode
+                || !self.spot_fresh(sp)
                 || worked.contains(r)
                 || (self.new_parks_only && !(self.park_is_new)(r))
                 || self.is_skipped(&base_call(&sp.activator), band, &sp.mode, &[r.to_string()])
@@ -1912,10 +1922,12 @@ impl Hunter {
         if !self.enabled {
             return false;
         }
-        // max() keeps the first of equal values
+        // A park new to the operator comes first, then the strongest SNR; the first of equal
+        // candidates wins.
+        let rank = |c: &Candidate| (!c.ref_.is_empty() && (self.park_is_new)(&c.ref_), c.decode.snr);
         let mut best = &cands[0];
         for c in &cands[1..] {
-            if c.decode.snr > best.decode.snr {
+            if rank(c) > rank(best) {
                 best = c;
             }
         }

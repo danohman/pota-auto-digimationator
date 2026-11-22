@@ -557,6 +557,13 @@ impl Wizard {
                        "When an activator ends one QSO with 73 or RR73, the program can call them right away, which is often the quickest way in during a pile-up. It needs WSJT-X to show every decode, not only CQs (see the WSJT-X page). Turn it off if you keep WSJT-X's CQ only filter on.");
                 switch(l, "Answer stations that call me", super::onoff(app.s.answer_callers, "Answers them automatically, POTA or not, while Auto-Hunt is on", "Lists them with an Answer button instead"), &mut app.s.answer_callers,
                        "When on, a station that calls you is answered automatically while Auto-Hunt is enabled, whether or not it is a POTA activator. Stations you already worked on this band and mode today, skipped stations and anyone calling while you are in a QSO are not answered. Off lists such callers with an Answer button instead.");
+                l.section("Spot age");
+                let (vals, labels) = super::stepper_labels_age();
+                let idx = vals.iter().position(|v| *v == app.s.spot_max_age).unwrap_or(vals.len() - 1);
+                if let Some(i) = l.stepper_row("POTA spot max age", "Older spots are hidden", &labels, idx) {
+                    app.s.spot_max_age = vals[i];
+                }
+                help(l, "The oldest pota.app spot to show in the Spots list and in the new parks on other bands lines. 30 minutes is the default; a shorter time shows only activators who were spotted recently and are more likely still on the air.");
                 l.section("Transmit frequency");
                 switch(l, "Move Tx to their frequency", super::onoff(app.s.move_tx, "Tx and Rx will move to their frequency", "Only Rx moves, Tx stays where you put it"), &mut app.s.move_tx,
                        "Off (recommended): when the program calls a station, only WSJT-X's receive frequency moves to theirs and your transmit frequency stays where you put it. On: your transmit frequency is moved onto the station's as well. Auto CQ/Answer never moves your transmit frequency, whatever you choose here.");
@@ -760,6 +767,7 @@ impl Wizard {
                     ("Dry run", on(s.dry_run).to_string()),
                     ("Give up after", give),
                     ("Skip weaker than", snr),
+                    ("POTA spot max age", format!("{} minutes", s.spot_max_age)),
                     ("Hunting", format!("new parks only {}, after 73 {}, answer callers {}, move Tx {}", on(s.new_parks_only), on(s.pounce_signoffs), on(s.answer_callers), on(s.move_tx))),
                     ("Auto CQ message", s.cq_text.clone()),
                     ("pota.app", if s.pota_refresh_token.is_empty() { "not signed in".to_string() } else { format!("{}, respot {}", if s.pota_user.is_empty() { "signed in" } else { &s.pota_user }, on(s.respot)) }),
