@@ -23,6 +23,7 @@ mod pota_spots;
 mod presence;
 mod programs;
 mod respot;
+mod rotctld;
 mod settings;
 mod sound;
 mod sysinfo;

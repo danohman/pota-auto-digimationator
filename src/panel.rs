@@ -73,6 +73,7 @@ pub enum Tab {
     #[default]
     Hunting,
     Radio,
+    Rotator,
     Logging,
     Connect,
     Appearance,
@@ -80,9 +81,10 @@ pub enum Tab {
     About,
 }
 
-pub const TABS: [(Tab, &str); 7] = [
+pub const TABS: [(Tab, &str); 8] = [
     (Tab::Hunting, "Hunting"),
     (Tab::Radio, "Radio"),
+    (Tab::Rotator, "Rotator"),
     (Tab::Logging, "Logging"),
     (Tab::Connect, "Connections"),
     (Tab::Appearance, "Appearance"),
@@ -112,6 +114,8 @@ pub struct Panel {
     /// the logger chosen in the Logging tab drop-down and the host/port text of every logger
     lg_sel: usize,
     lg_bufs: Vec<(String, String)>,
+    /// the Radio tab's rotctld host and port text (None = take them from the settings)
+    rot_buf: Option<(String, String)>,
     respot_msg: String,
     error: String,
     focus_first: bool,
@@ -153,6 +157,7 @@ enum Do {
     RunWizard,
     ResetSettings,
     TestCat,
+    TestRotator,
     PotaSignIn,
     PotaCancel,
     PotaSignOut,
@@ -663,6 +668,7 @@ impl Panel {
             self.open = false;
             self.demo = false;
             self.lg_bufs.clear();
+            self.rot_buf = None;
             self.dd = None;
             self.page = Page::Main;
             self.about_sel = None;
@@ -712,6 +718,7 @@ impl Panel {
                 match tab {
                     Tab::Hunting => self.hunting_tab(app, &mut l),
                     Tab::Radio => self.radio_tab(app, &mut l),
+                    Tab::Rotator => self.rotator_tab(app, &mut l),
                     Tab::Logging => self.logging_tab(app, &mut l),
                     Tab::Connect => self.connect_tab(app, &mut l),
                     Tab::Appearance => {
@@ -1173,6 +1180,68 @@ impl Panel {
         l.paragraph("When enabled, NB, NR, ATT and Tx power are restored to the settings the radio had before the program changed them, before the program QSYs to another band and when it closes.", &small, muted, w, 0.0, 8.0);
     }
 
+    fn rotator_tab(&mut self, app: &mut App, l: &mut L) {
+        l.section("Rotator (rotctld)");
+        let mut on = app.s.rotctld_enabled;
+        l.switch_row("Use a rotator", onoff(on, "Connects to the rotctld server below", "No rotator"), &mut on, true, 0.0);
+        if on != app.s.rotctld_enabled {
+            app.s.rotctld_enabled = on;
+            l.act.push(Do::Changed);
+        }
+        let (mut h, mut port) = self.rot_buf.take().unwrap_or_else(|| (app.s.rotctld_host.clone(), app.s.rotctld_port.to_string()));
+        l.form(&mut [("rotctld host", &mut h, 24.0, false), ("rotctld port", &mut port, 8.0, false)], 6.0, false);
+        let valid = port.trim().parse::<u16>().ok().filter(|n| *n >= 1).filter(|_| !h.trim().is_empty());
+        if let Some(n) = valid {
+            if app.s.rotctld_host != h.trim() || app.s.rotctld_port != n {
+                app.s.rotctld_host = h.trim().to_string();
+                app.s.rotctld_port = n;
+                l.act.push(Do::Changed);
+            }
+        } else {
+            let e = if h.trim().is_empty() { "Enter the host (127.0.0.1 for this computer)" } else { "Port must be a number from 1 to 65535" };
+            l.text(l.left + 1.0, l.y + 1.0, e, &l.f.small, l.p.bad);
+            l.y += l.f.small.m.linespace + 2.0;
+        }
+        self.rot_buf = Some((h, port));
+        let (w, small, muted) = (l.right - l.left, l.f.small.clone(), l.p.muted);
+        l.paragraph("Start Hamlib's rotctld (for example rotctld -m 1 for a test rotator, or your controller's model number) and enter where it listens. rotctld's default port is 4533.", &small, muted, w, 0.0, 4.0);
+        {
+            let testing = app.rot_testing;
+            let b = l.small_button(if testing { "Testing…" } else { "Test rotator" });
+            let sz = b.size(l.ui);
+            l.y += 4.0;
+            if l.paint {
+                let r = Rect::from_min_size(Pos2::new(l.left, l.y), sz);
+                if l.button(&b, r, Id::unique("test-rot"), !testing && app.s.rotctld_enabled) {
+                    l.act.push(Do::TestRotator);
+                }
+            }
+            l.y += sz.y + 4.0;
+            let (text, bad) = match &app.rot_note {
+                Some((t, bad)) => (t.as_str(), *bad),
+                None => ("Reads the rotator's current heading", false),
+            };
+            let w = l.text(l.left, l.y + 1.0, text, &l.f.small, if bad { l.p.bad } else { l.p.muted });
+            l.need(w + 40.0);
+            l.y += l.f.small.m.linespace + 2.0 + 8.0;
+        }
+        l.section("Aiming");
+        let mut v = app.s.rotctld_auto;
+        l.switch_row("Turn to the station I'm calling", onoff(v, "Turns the antenna toward the activator's park when a QSO target is picked", "The antenna only moves when you move it"), &mut v, true, 0.0);
+        if v != app.s.rotctld_auto {
+            app.s.rotctld_auto = v;
+            l.act.push(Do::Changed);
+        }
+        let vals: Vec<u32> = vec![0, 5, 10, 15, 20, 25, 30, 45];
+        let labels: Vec<String> = vals.iter().map(|d| if *d == 0 { "Always".to_string() } else { format!("± {d}°") }).collect();
+        let idx = vals.iter().position(|v| *v == app.s.rotctld_deadband).unwrap_or(4);
+        if let Some(i) = l.stepper_row("Don't move if already within", "Leaves the antenna alone when it already points this close to the station", &labels, idx) {
+            app.s.rotctld_deadband = vals[i];
+            l.act.push(Do::Changed);
+        }
+        l.paragraph("The heading is the great-circle bearing from your WSJT-X grid to the park, so it needs your grid in WSJT-X and the park's position from pota.app. You stay in charge of the antenna: check it is clear to turn.", &small, muted, w, 0.0, 8.0);
+    }
+
     fn connect_tab(&mut self, app: &mut App, l: &mut L) {
         l.section("WSJT-X");
         let (_, ok) = app.wsjtx_link();
@@ -1576,6 +1645,7 @@ impl Panel {
                     }
                 },
                 Do::TestCat => app.start_cat_test(),
+                Do::TestRotator => app.start_rotator_test(),
                 Do::CheckUpdate => app.check_update(true),
                 Do::RunWizard => {
                     self.close(now);

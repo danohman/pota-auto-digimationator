@@ -26,6 +26,8 @@ pub enum Event {
     CqTx(String),
     /// result of the Radio tab's "Test CAT Control": (all passed, lines)
     CatTest(bool, Vec<String>),
+    /// result of the Rotator tab's "Test rotator": the heading text, or why it failed
+    RotTest(Result<String, String>),
     /// result of "Sign in" through the browser on a pota.app page: the tokens, None when
     /// cancelled, or why it failed
     PotaLogin(Result<Option<crate::pota_auth::Tokens>, String>),

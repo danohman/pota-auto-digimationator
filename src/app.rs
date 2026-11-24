@@ -17,6 +17,7 @@ use eframe::egui::{self, Color32, CursorIcon, Id, Key, Order, Pos2, Rect, Sense,
 
 mod debug;
 mod filters;
+mod rotator;
 
 use crate::aclog::AclogClient;
 use crate::cat::RigClient;
@@ -341,6 +342,13 @@ pub struct App {
     rig_applied: bool,
     /// the Radio tab's CAT test is running
     pub cat_testing: bool,
+    /// Rotator tab: a test is running, and its result line (text, failed)
+    pub rot_testing: bool,
+    pub rot_note: Option<(String, bool)>,
+    /// the target call the antenna was last aimed at (so it turns once per target)
+    rot_aimed: String,
+    /// the rotator's heading and turn state, kept up to date by a poller thread
+    rot: Arc<Mutex<rotator::RotState>>,
     /// the browser sign-in to pota.app is waiting / its last result (ok, text)
     pub cred_checking: bool,
     pub cred_result: Option<(bool, String)>,
@@ -576,6 +584,8 @@ impl App {
                 Some((Card::from_key(k)?, Pop::new(g.popped, r)))
             })
             .collect();
+        let rot = Arc::new(Mutex::new(rotator::RotState::from_settings(&s)));
+        rotator::start_poller(rot.clone());
         let mut app = App {
             dir: dir.clone(),
             s,
@@ -630,6 +640,10 @@ impl App {
             rig_key: None,
             rig_applied: false,
             cat_testing: false,
+            rot_testing: false,
+            rot_note: None,
+            rot_aimed: String::new(),
+            rot,
             cred_checking: false,
             cred_result: None,
             pota_cancel: Arc::new(AtomicBool::new(false)),
@@ -1081,6 +1095,10 @@ impl App {
         }
         self.move_tx.store(self.s.move_tx, Ordering::SeqCst);
         self.aclog.set_addr(self.s.aclog_host.trim(), self.s.aclog_port);
+        {
+            let mut r = self.rot.lock().unwrap();
+            (r.enabled, r.host, r.port) = (self.s.rotctld_enabled, self.s.rotctld_host.trim().to_string(), self.s.rotctld_port);
+        }
         self.push_rig_cfg();
         self.save_settings();
     }
@@ -1112,6 +1130,7 @@ impl App {
         if std::mem::take(&mut self.h.wanted_ready) && self.s.pop {
             sound::play(sound::Kind::Pop, &self.s.pop_path);
         }
+        self.aim_rotator();
         self.h.cq_stopped = false; // the Auto CQ/Answer button reads the hunter directly
     }
 
@@ -1401,6 +1420,7 @@ impl App {
                     Err(e) => self.update_note = Some((format!("Update failed: {e}"), true)),
                 }
             }
+            Event::RotTest(r) => self.rotator_test_done(r),
             Event::CatTest(ok, lines) => {
                 self.cat_testing = false;
                 self.log(&format!("CAT test {}", if ok { "passed" } else { "FAILED" }), if ok { Tag::Info } else { Tag::Error });
@@ -2536,6 +2556,22 @@ impl App {
         }
         let spots_text = self.spots_text.clone();
         let spots = self.chip(&spots_text, &f.ui).dot(Some(if self.spots_failed { p.bad } else { p.accent }));
+        let rot = self.s.rotctld_enabled.then(|| self.rot.lock().unwrap().clone());
+        let rot_text = rot.as_ref().map(|r| match (r.az, r.target.filter(|_| r.moving)) {
+            (Some(a), Some(t)) => format!("Rotor {a:.0}° → {t:.0}°"),
+            (Some(a), None) => format!("Rotor {a:.0}°"),
+            (None, _) => "Rotor: no answer".to_string(),
+        });
+        let rot_fill = rot.as_ref().map(|r| if r.moving { theme::mix(p.surface, p.warn, 0.75 * pulse(self.now(), 1.0) as f32) } else { p.surface });
+        if rot.as_ref().is_some_and(|r| r.moving) {
+            ui.ctx().request_repaint_after(Duration::from_millis(40));
+        } else if rot.is_some() {
+            ui.ctx().request_repaint_after(Duration::from_millis(500));
+        }
+        let rot_chip = rot_text.as_deref().map(|t| {
+            let c = self.chip(t, &f.ui).colors(rot_fill.unwrap_or(p.surface), p.text).min_text("Rotor 000°");
+            if rot.as_ref().is_some_and(|r| r.az.is_none()) { c.dot(Some(p.bad)) } else { c }
+        });
         let radio = if connected { self.radio } else { None };
         let radio_label = radio.map(|r| r.spec().0).unwrap_or("");
         let now = self.now();
@@ -2563,6 +2599,9 @@ impl App {
             items.push((2, band_dd.size(ui), 6.0));
             items.push((3, mode_dd.size(ui), 6.0));
             items.push((5, prog_dd.size(ui), 8.0));
+        }
+        if let Some(c) = &rot_chip {
+            items.push((7, c.size(ui), 8.0));
         }
         if radio.is_some() {
             items.push((4, tx.size(ui), 8.0));
@@ -2617,6 +2656,17 @@ impl App {
                 let avail = ui.ctx().content_rect().height();
                 self.open_programs_menu(Pos2::new(r.left(), r.bottom() + 2.0), None, avail);
             }
+        }
+        if let (Some(c), Some(at)) = (&rot_chip, spot(7)) {
+            let r = place(c.size(ui), at);
+            let resp = c.show(ui, Id::unique("rotor-chip"), r, false);
+            let tip = match rot.as_ref().map(|r| (r.az, r.target.filter(|_| r.moving), r.moving)) {
+                Some((Some(a), Some(t), _)) => format!("The antenna points at {a:.0}° and is turning to {t:.0}°"),
+                Some((Some(a), None, true)) => format!("The antenna points at {a:.0}° and is moving"),
+                Some((Some(a), None, false)) => format!("The antenna points at {a:.0}°"),
+                _ => format!("rotctld at {}:{} is not answering (Settings > Rotator)", self.s.rotctld_host, self.s.rotctld_port),
+            };
+            self.tips.tip(&resp, &tip, 500, TipAt::Below(r));
         }
         if let Some((bx, by)) = spot(4) {
             let sz = tx.size(ui);
@@ -4026,6 +4076,7 @@ impl App {
                 s if s.starts_with("panel") => {
                     let (tab, page) = match s.split(':').nth(1).unwrap_or("") {
                         "radio" => (Tab::Radio, Page::Main),
+                        "rotator" => (Tab::Rotator, Page::Main),
                         "logging" => (Tab::Logging, Page::Main),
                         "connect" => (Tab::Connect, Page::Main),
                         "appearance" => (Tab::Appearance, Page::Main),

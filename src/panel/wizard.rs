@@ -323,6 +323,7 @@ impl Wizard {
                     Kind::Pop => app.s.pop_path.clear(),
                 },
                 Do::TestCat => app.start_cat_test(),
+                Do::TestRotator => app.start_rotator_test(),
                 Do::PotaSignIn => app.start_pota_sign_in(),
                 Do::PotaCancel => app.cancel_pota_sign_in(),
                 Do::PotaSignOut => app.pota_sign_out(),

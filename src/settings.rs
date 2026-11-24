@@ -91,6 +91,15 @@ pub struct Settings {
     pub aclog_enabled: bool,
     pub aclog_host: String,
     pub aclog_port: u16,
+    /// use a Hamlib rotctld rotator server (Settings > Rotator)
+    pub rotctld_enabled: bool,
+    pub rotctld_host: String,
+    /// rotctld's default is 4533
+    pub rotctld_port: u16,
+    /// turn the antenna to the station being called
+    pub rotctld_auto: bool,
+    /// do not turn when it already points within this many degrees of the station (0 = always turn)
+    pub rotctld_deadband: u32,
     /// Log4OM, DXKeeper, HRD Logbook, N1MM Logger+ and Logger32 by `loggers::Kind::key`
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub loggers: BTreeMap<String, LoggerCfg>,
@@ -167,6 +176,11 @@ impl Default for Settings {
             aclog_enabled: false,
             aclog_host: "127.0.0.1".into(),
             aclog_port: 1100,
+            rotctld_enabled: false,
+            rotctld_host: "127.0.0.1".into(),
+            rotctld_port: 4533,
+            rotctld_auto: false,
+            rotctld_deadband: 20,
             loggers: BTreeMap::new(),
             adif_path: String::new(),
             pounce_signoffs: true,

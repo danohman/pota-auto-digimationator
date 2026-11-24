@@ -191,6 +191,7 @@ impl App {
         }));
         item(&mut v, "Hunt counts", format!("{}{}", self.pota_status, if self.pota_failed { " (failed)" } else { "" }));
         item(&mut v, "ACLog", if s.aclog_enabled { format!("on, {}:{}", s.aclog_host, s.aclog_port) } else { "off".into() });
+        item(&mut v, "Rotator (rotctld)", if s.rotctld_enabled { format!("on, {}:{}", s.rotctld_host, s.rotctld_port) } else { "off".into() });
         item(&mut v, "Radio (CAT)", format!("{} {} on {} at {} baud; clean {}, restore {}", s.rig_type, s.rig_model, if s.rig_com.is_empty() { "no port" } else { &s.rig_com }, s.rig_baud, yes(s.rig_clean), yes(s.rig_restore)));
 
         section(&mut v, "Hunter");
