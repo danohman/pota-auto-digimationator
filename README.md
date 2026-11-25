@@ -27,6 +27,7 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 - [Logging](#logging)
 - [pota.app: spots and hunt counts](#potaapp-spots-and-hunt-counts)
 - [Radio (CAT) settings](#radio-cat-settings)
+- [Rotor control](#rotor-control)
 - [Making it yours](#making-it-yours)
 - [Troubleshooting](#troubleshooting)
 - [Safety](#safety)
@@ -205,6 +206,18 @@ With **Settings > Connections > Respot to pota.app after each QSO** on (the defa
 - **Test CAT Control**: the button briefly changes NB, NR, ATT and power, checks the radio confirms each, puts them back and shows a pass or fail box. It is refused while WSJT-X is transmitting.
 - **What it does**: with a port chosen, the program can keep attenuator (ATT), noise blanker (NB) and noise reduction (NR) off and set the transmit power, at start-up and after each band or mode change. It reads each setting back from the radio to confirm it took (the Current Info line says which radio and port, and that it was confirmed). If you don't use CAT control, leave the receiver switch off. On close the program can put each setting back on, off or leave it alone.
 - **Power limits**: the model sets the maximum power (for example 200 W on the FTDX101MP, 10 W on the IC-705), and a chosen value above it is held to it.
+
+## Rotor control
+
+**Settings > Rotator** can turn your antenna toward the station you are calling. It talks to Hamlib's `rotctld` server, so it works with any rotator controller Hamlib supports. It is optional and off by default.
+
+1. Start `rotctld` for your controller (for example `rotctld -m 1` for Hamlib's test rotator, or your controller's model number). It listens on port 4533 unless you change it.
+2. In **Settings > Rotator**, turn on **Use a rotator**, enter the host (127.0.0.1 for this computer) and port, and press **Test rotator**. It shows the heading the rotator reports.
+3. Turn on **Turn to the station I'm calling**. When Auto-Hunt picks a station, the antenna turns to the great-circle bearing from your WSJT-X grid to the activator's park, once per station. This needs your grid in WSJT-X and the park's position from pota.app.
+4. **Don't move if already within** leaves the antenna alone when it already points that close to the station (Always, or ± 5° to ± 45°).
+5. **Bands**: one switch per band. The rotor only turns on the bands that are on (all of them by default); on any other band it stays put.
+
+The status row shows a **Rotor** chip with the current heading ("Rotor 123°"), "Rotor 123° → 210°" and a pulsing color while a turn is under way, "Rotor: no answer" when `rotctld` can't be reached, and "Rotor N/A" when the current band is switched off. You stay in charge of the antenna: check that it is clear to turn.
 
 ## Making it yours
 

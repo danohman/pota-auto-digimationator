@@ -31,6 +31,11 @@ impl App {
         });
     }
 
+    /// The rotator may move on the current band (Settings > Rotator > Bands). An unknown band counts as allowed.
+    pub fn rot_band_ok(&self) -> bool {
+        self.h.band().is_none_or(|b| self.s.rotctld_bands.iter().any(|x| x == b))
+    }
+
     /// Turn the antenna toward the park of the station being called, once per target and
     /// only when it is not already pointing within the dead band.
     pub(super) fn aim_rotator(&mut self) {
@@ -38,7 +43,7 @@ impl App {
             self.rot_aimed.clear();
             return;
         };
-        if !self.s.rotctld_enabled || !self.s.rotctld_auto || self.rot_aimed == call {
+        if !self.s.rotctld_enabled || !self.s.rotctld_auto || self.rot_aimed == call || !self.rot_band_ok() {
             return;
         }
         let Some(me) = self.h.status.as_ref().and_then(|s| crate::geo::grid_center(&s.de_grid)) else { return };

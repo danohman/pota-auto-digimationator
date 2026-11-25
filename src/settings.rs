@@ -100,6 +100,8 @@ pub struct Settings {
     pub rotctld_auto: bool,
     /// do not turn when it already points within this many degrees of the station (0 = always turn)
     pub rotctld_deadband: u32,
+    /// bands the rotator may turn for ("20m"); on other bands it stays put and the chip says N/A
+    pub rotctld_bands: Vec<String>,
     /// Log4OM, DXKeeper, HRD Logbook, N1MM Logger+ and Logger32 by `loggers::Kind::key`
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub loggers: BTreeMap<String, LoggerCfg>,
@@ -181,6 +183,7 @@ impl Default for Settings {
             rotctld_port: 4533,
             rotctld_auto: false,
             rotctld_deadband: 20,
+            rotctld_bands: crate::hunter::BANDS.iter().map(|b| b.0.to_string()).collect(),
             loggers: BTreeMap::new(),
             adif_path: String::new(),
             pounce_signoffs: true,

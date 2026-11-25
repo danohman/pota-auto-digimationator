@@ -1239,6 +1239,17 @@ impl Panel {
             app.s.rotctld_deadband = vals[i];
             l.act.push(Do::Changed);
         }
+        l.section("Bands");
+        for (band, _, _) in crate::hunter::BANDS.iter() {
+            let mut v = app.s.rotctld_bands.iter().any(|x| x == band);
+            let (_, t) = l.switch_row(band, onoff(v, "The rotator turns on this band", "The rotator stays put; the chip shows Rotor N/A"), &mut v, true, 0.0);
+            if t {
+                app.s.rotctld_bands.retain(|x| x != band);
+                if v {
+                    app.s.rotctld_bands.push(band.to_string());
+                }
+            }
+        }
         l.paragraph("The heading is the great-circle bearing from your WSJT-X grid to the park, so it needs your grid in WSJT-X and the park's position from pota.app. You stay in charge of the antenna: check it is clear to turn.", &small, muted, w, 0.0, 8.0);
     }
 

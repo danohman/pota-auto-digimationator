@@ -2557,7 +2557,9 @@ impl App {
         let spots_text = self.spots_text.clone();
         let spots = self.chip(&spots_text, &f.ui).dot(Some(if self.spots_failed { p.bad } else { p.accent }));
         let rot = self.s.rotctld_enabled.then(|| self.rot.lock().unwrap().clone());
+        let rot_na = !self.rot_band_ok();
         let rot_text = rot.as_ref().map(|r| match (r.az, r.target.filter(|_| r.moving)) {
+            _ if rot_na => "Rotor N/A".to_string(),
             (Some(a), Some(t)) => format!("Rotor {a:.0}° → {t:.0}°"),
             (Some(a), None) => format!("Rotor {a:.0}°"),
             (None, _) => "Rotor: no answer".to_string(),
@@ -2570,7 +2572,7 @@ impl App {
         }
         let rot_chip = rot_text.as_deref().map(|t| {
             let c = self.chip(t, &f.ui).colors(rot_fill.unwrap_or(p.surface), p.text).min_text("Rotor 000°");
-            if rot.as_ref().is_some_and(|r| r.az.is_none()) { c.dot(Some(p.bad)) } else { c }
+            if !rot_na && rot.as_ref().is_some_and(|r| r.az.is_none()) { c.dot(Some(p.bad)) } else { c }
         });
         let radio = if connected { self.radio } else { None };
         let radio_label = radio.map(|r| r.spec().0).unwrap_or("");
