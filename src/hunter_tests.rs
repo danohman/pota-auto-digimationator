@@ -1195,9 +1195,26 @@ fn completion_from_our_own_73() {
     let mut s = T::new();
     s.cycle(&[dec("CQ POTA K1ABC FN42")]);
     let mut x = st_tx(true, true, "K1ABC");
+    x.tx_message = "K1ABC WD4DAN FN42".into();
+    s.hs(x);
+    let mut x = st_tx(true, true, "K1ABC");
     x.tx_message = "K1ABC WD4DAN 73                      ".into();
     s.hs(x);
     assert!(s.h.is_worked("K1ABC", "20m", "FT8", &[]));
+}
+
+/// WSJT-X keeps the last-sent message and DX call from an earlier QSO with the same call
+/// (G5ACE/P, 2026-11-25): a lingering "RR73" is not a new completion.
+#[test]
+fn stale_tx_message_from_an_earlier_qso_is_not_a_completion() {
+    let mut s = T::new();
+    s.cycle(&[dec("CQ POTA K1ABC FN42")]);
+    let mut x = st_tx(true, true, "K1ABC");
+    x.tx_message = "K1ABC WD4DAN RR73".into();
+    s.hs(x.clone());
+    s.hs(x);
+    assert!(!s.h.is_worked("K1ABC", "20m", "FT8", &[]));
+    assert!(s.h.awaiting_log.is_none());
 }
 
 #[test]

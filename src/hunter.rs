@@ -234,6 +234,10 @@ pub struct Target {
     pub saw_tx: bool,
     /// WSJT-X's DX call has switched to this target
     pub seen_dx: bool,
+    /// WSJT-X's tx_message when we first saw this target's Status; a message that has not
+    /// changed since is left over from an earlier QSO with the same call
+    pub tx_at_start: Option<String>,
+    pub tx_changed: bool,
     pub completed: bool,
     /// park the station was spotted at when we called ("" = unknown)
     pub ref_: String,
@@ -1212,6 +1216,10 @@ impl Hunter {
         if t.seen_dx && (st.tx_enabled || st.transmitting) {
             t.saw_tx = true;
         }
+        let base = t.tx_at_start.get_or_insert_with(|| st.tx_message.clone());
+        if st.tx_message != *base {
+            t.tx_changed = true;
+        }
         if !t.saw_tx {
             if self.now() - t.started > Self::START_TIMEOUT {
                 if t.signoff {
@@ -1240,7 +1248,9 @@ impl Hunter {
         // WSJT-X can report "transmitting" before it updates tx_message, so the RR73/73
         // may only appear in a Status after Tx has ended. tx_message is what was last
         // sent, and seen_dx rules out an earlier QSO's message.
-        if is_final(&st.tx_message, &t.call, &self.my_call()) {
+        // Not a stale one: WSJT-X keeps the last-sent message (and DX call) from an earlier
+        // QSO with this same call, e.g. "G5ACE/P WD4DAN RR73" hours later (found 2026-11-25).
+        if t.tx_changed && is_final(&st.tx_message, &t.call, &self.my_call()) {
             self.qso_complete(&mut t);
         }
         let waiting = !t.answered || (t.replying && !t.heard);
