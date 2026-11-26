@@ -119,7 +119,7 @@ pub fn start_poller(state: Arc<Mutex<RotState>>) {
                 let read = crate::rotctld::position(&host, port).ok().map(|(az, _)| az);
                 let mut s = state.lock().unwrap();
                 s.az = read;
-                let changed = matches!((read, last), (Some(a), Some(b)) if heading_diff(a, b) >= 0.5);
+                let changed = matches!((read, last), (Some(a), Some(b)) if heading_diff(a, b) >= 2.0);
                 if let (Some(t), Some(a)) = (s.target, read) {
                     if heading_diff(a, t) <= 2.0 || epoch_now() - s.target_at > 180.0 {
                         s.target = None;
