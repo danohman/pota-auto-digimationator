@@ -1783,11 +1783,16 @@ impl Hunter {
         let sent = sent_call(&t.call, t.decode.as_ref());
         let mut entry = WorkedEntry::new(&sent, &t.band, &t.mode, Some((self.utcnow)()), &t.ref_, &t.park);
         entry.logged = false;
-        if self.add_worked(entry).1 {
+        let (i, added) = self.add_worked(entry);
+        if added {
             self.worked_did_change();
         }
+        let already_logged = !added && self.worked[i].logged;
         let at = if t.ref_.is_empty() { " (park unknown)".to_string() } else { format!(" at {}", t.ref_) };
         self.log(format!("QSO complete with {sent} on {} {}{at}", t.band, t.mode), Tag::Worked);
+        if already_logged {
+            return; // a repeated 73 after WSJT-X already logged it: nothing to wait for
+        }
         self.awaiting_log = Some(AwaitingLog { call: t.call.clone(), deadline: self.now() + Self::LOG_WAIT_SECONDS });
     }
 
