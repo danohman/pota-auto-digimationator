@@ -13,9 +13,9 @@ use sha2::{Digest, Sha256};
 
 use crate::pota_auth::USER_AGENT;
 
-const REPO: &str = "danohman/pota-auto-digimationator";
+const REPO: &str = "danohman/pota-ft-hunter";
 /// the stable name of the bare exe the release workflow publishes
-const EXE_ASSET: &str = "pota-auto-digimationator.exe";
+const EXE_ASSET: &str = "pota-ft-hunter.exe";
 /// refuse a download bigger than this (the exe is a few MB)
 const MAX_BYTES: u64 = 200 * 1024 * 1024;
 
@@ -224,9 +224,9 @@ mod tests {
     }
 
     const SAMPLE: &str = r#"{"tag_name":"v1.2.0","html_url":"https://github.com/o/r/releases/tag/v1.2.0","assets":[
-        {"name":"pota-auto-digimationator-v1.2.0-windows-x64.zip","browser_download_url":"https://github.com/z"},
-        {"name":"pota-auto-digimationator.exe","browser_download_url":"https://github.com/e"},
-        {"name":"pota-auto-digimationator.exe.sha256","browser_download_url":"https://github.com/s"}]}"#;
+        {"name":"pota-ft-hunter-v1.2.0-windows-x64.zip","browser_download_url":"https://github.com/z"},
+        {"name":"pota-ft-hunter.exe","browser_download_url":"https://github.com/e"},
+        {"name":"pota-ft-hunter.exe.sha256","browser_download_url":"https://github.com/s"}]}"#;
 
     #[test]
     fn parses_a_release() {
@@ -243,7 +243,7 @@ mod tests {
         let mut exe = vec![0u8; 200_000];
         exe[0] = b'M';
         exe[1] = b'Z';
-        let good = format!("{}  pota-auto-digimationator.exe\n", hex(&Sha256::digest(&exe)));
+        let good = format!("{}  pota-ft-hunter.exe\n", hex(&Sha256::digest(&exe)));
         assert!(verify(&exe, Some(&good)).is_ok());
         assert!(verify(&exe, None).is_ok());
         assert!(verify(&exe, Some("00ff  x")).is_err());

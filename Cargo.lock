@@ -2689,7 +2689,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pota-auto-digimationator"
+name = "pota-ft-hunter"
 version = "1.0.21-beta"
 dependencies = [
  "base64",

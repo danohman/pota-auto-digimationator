@@ -34,7 +34,7 @@ pub const REDIRECT_URI: &str = "http://localhost:8080/";
 /// how long the browser sign-in may take
 pub const LOGIN_TIMEOUT: Duration = Duration::from_secs(180);
 pub const STATS_URL: &str = "https://api.pota.app/user/stats/hunted_activated_list?type=";
-pub const USER_AGENT: &str = "POTA-Auto-Digimationator (WD4DAN)";
+pub const USER_AGENT: &str = "POTA-FT-Hunter (WD4DAN)";
 /// hunt counts only change when a log is uploaded to pota.app
 pub const REFRESH_EVERY: f64 = 30.0 * 60.0;
 pub const BACKOFF: [f64; 3] = [120.0, 300.0, 600.0];
@@ -208,12 +208,12 @@ fn open_browser(url: &str) -> Result<(), FetchError> {
         .map_err(|e| FetchError::Net(format!("could not open your browser: {e}")))
 }
 
-const DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA Auto-Digimationator</title></head>\
+const DONE_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA FT-Hunter</title></head>\
 <body style=\"font-family:sans-serif;margin:3em\"><h2>You are signed in</h2>\
-<p>You can close this tab and go back to POTA Auto-Digimationator.</p></body></html>";
-const FAIL_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA Auto-Digimationator</title></head>\
+<p>You can close this tab and go back to POTA FT-Hunter.</p></body></html>";
+const FAIL_PAGE: &str = "<!doctype html><html><head><meta charset=\"utf-8\"><title>POTA FT-Hunter</title></head>\
 <body style=\"font-family:sans-serif;margin:3em\"><h2>Sign-in did not finish</h2>\
-<p>Go back to POTA Auto-Digimationator and try again.</p></body></html>";
+<p>Go back to POTA FT-Hunter and try again.</p></body></html>";
 
 fn reply(mut s: TcpStream, status: &str, body: &str) {
     let _ = write!(s, "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());

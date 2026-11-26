@@ -35,22 +35,22 @@ jobs:
       - name: Package
         shell: pwsh
         run: |
-          $name = "pota-auto-digimationator-${{ github.ref_name }}-windows-x64"
+          $name = "pota-ft-hunter-${{ github.ref_name }}-windows-x64"
           New-Item -ItemType Directory $name | Out-Null
-          Copy-Item target/release/pota-auto-digimationator.exe $name/
+          Copy-Item target/release/pota-ft-hunter.exe $name/
           Copy-Item README.md, LICENSE $name/
           Compress-Archive -Path $name -DestinationPath "$name.zip"
           Get-FileHash "$name.zip" -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  $name.zip" } | Out-File "$name.zip.sha256" -Encoding ascii
-          Copy-Item target/release/pota-auto-digimationator.exe pota-auto-digimationator.exe
+          Copy-Item target/release/pota-ft-hunter.exe pota-ft-hunter.exe
           # the in-app updater checks the exe it downloads against this
-          Get-FileHash pota-auto-digimationator.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  pota-auto-digimationator.exe" } | Out-File pota-auto-digimationator.exe.sha256 -Encoding ascii
+          Get-FileHash pota-ft-hunter.exe -Algorithm SHA256 | ForEach-Object { "$($_.Hash.ToLower())  pota-ft-hunter.exe" } | Out-File pota-ft-hunter.exe.sha256 -Encoding ascii
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
-            pota-auto-digimationator.exe
-            pota-auto-digimationator.exe.sha256
-            pota-auto-digimationator-*.zip
-            pota-auto-digimationator-*.zip.sha256
+            pota-ft-hunter.exe
+            pota-ft-hunter.exe.sha256
+            pota-ft-hunter-*.zip
+            pota-ft-hunter-*.zip.sha256

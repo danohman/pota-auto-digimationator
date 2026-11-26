@@ -98,9 +98,9 @@ fn report_previous_run() {
         header("UNEXPECTED EXIT")
     ));
     let log = log_path().map(|p| p.display().to_string()).unwrap_or_default();
-    let text = format!("The last run of POTA Auto-Digimationator ended unexpectedly.\n\nDetails (if any were recorded) are in:\n{log}");
+    let text = format!("The last run of POTA FT-Hunter ended unexpectedly.\n\nDetails (if any were recorded) are in:\n{log}");
     let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
-    unsafe { MessageBoxW(std::ptr::null_mut(), wide(&text).as_ptr(), wide("POTA Auto-Digimationator").as_ptr(), MB_OK | MB_ICONWARNING) };
+    unsafe { MessageBoxW(std::ptr::null_mut(), wide(&text).as_ptr(), wide("POTA FT-Hunter").as_ptr(), MB_OK | MB_ICONWARNING) };
 }
 
 fn process_alive(pid: u32) -> bool {

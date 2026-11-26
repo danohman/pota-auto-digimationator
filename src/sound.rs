@@ -44,7 +44,7 @@ fn mci(cmd: &str) -> u32 {
 /// unless the bytes are already there).
 fn builtin(kind: Kind) -> Option<PathBuf> {
     let bytes = kind.bytes();
-    let p = std::env::temp_dir().join(format!("pota-auto-digimationator-{}-{}.mp3", kind.name(), bytes.len()));
+    let p = std::env::temp_dir().join(format!("pota-ft-hunter-{}-{}.mp3", kind.name(), bytes.len()));
     if std::fs::read(&p).map(|b| b == bytes).unwrap_or(false) || std::fs::write(&p, bytes).is_ok() {
         Some(p)
     } else {

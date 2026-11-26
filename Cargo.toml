@@ -1,5 +1,5 @@
 [package]
-name = "pota-auto-digimationator"
+name = "pota-ft-hunter"
 version = "1.0.21-beta"
 edition = "2024"
 description = "Calls Parks on the Air activators through WSJT-X"
@@ -8,7 +8,7 @@ authors = ["Dan Muntz (WD4DAN)"]
 publish = false
 
 [[bin]]
-name = "pota-auto-digimationator"
+name = "pota-ft-hunter"
 path = "src/main.rs"
 
 [dependencies]

@@ -1,8 +1,8 @@
-<p align="center"><img src="assets/logo.png" alt="POTA Auto-Digimationator" width="160"></p>
+<p align="center"><img src="assets/logo.png" alt="POTA FT-Hunter" width="160"></p>
 
-# POTA Auto-Digimationator for WSJT-X
+# POTA FT-Hunter for WSJT-X
 
-POTA Auto-Digimationator watches WSJT-X decodes over UDP and calls POTA activators for you, the same way a double-click on a decode would. It is a native Windows program written in Rust (egui/eframe).
+POTA FT-Hunter watches WSJT-X decodes over UDP and calls POTA activators for you, the same way a double-click on a decode would. It is a native Windows program written in Rust (egui/eframe).
 
 It was developed and tested using [WSJT-X Improved](https://ws-suite.sourceforge.io/). Stock WSJT-X is supported too.
 
@@ -37,7 +37,7 @@ Using the Auto-* modes in this application is intended to assist you, not replac
 
 ## Getting started
 
-The first time it runs (no `settings.json` in %APPDATA%\pota-auto-digimationator yet) a setup wizard walks you through every setting (13 pages, including your radio and its COM port), explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
+The first time it runs (no `settings.json` in %APPDATA%\pota-ft-hunter yet) a setup wizard walks you through every setting (13 pages, including your radio and its COM port), explaining each one; nothing is listened to or fetched until you finish it. You can run it again any time from Settings > Appearance > Run setup wizard.
 
 <p align="center">
 <img src="assets/screenshots/wizard-welcome.png" alt="Setup wizard, welcome page" width="32%">
@@ -58,7 +58,7 @@ The same instructions are in the app under **Settings > Connections > WSJT-X set
 
 ### 2. Run the program
 
-Build it (see [Building](#building)) and run `target\release\pota-auto-digimationator.exe`. The window shows "Waiting for WSJT-X..." until WSJT-X's first status message arrives.
+Build it (see [Building](#building)) and run `target\release\pota-ft-hunter.exe`. The window shows "Waiting for WSJT-X..." until WSJT-X's first status message arrives.
 
 ### 3. First run
 
@@ -246,7 +246,7 @@ The status row shows a **Rotor** chip with the current heading ("Rotor 123°"), 
 
 ## Files
 
-`settings.json`, `state.json` (today's worked list and skips) and `spots_cache.json` live in `%APPDATA%\pota-auto-digimationator`, along with a crash report if the program ever fails. The sounds and the icon are built into the exe, so it runs on its own.
+`settings.json`, `state.json` (today's worked list and skips) and `spots_cache.json` live in `%APPDATA%\pota-ft-hunter`, along with a crash report if the program ever fails. The sounds and the icon are built into the exe, so it runs on its own.
 
 ## Building
 
@@ -256,7 +256,7 @@ Install Rust (https://rustup.rs) and the Windows SDK (for the icon resource), th
 cargo build --release
 ```
 
-Run `target\release\pota-auto-digimationator.exe`. Tests: `cargo test`.
+Run `target\release\pota-ft-hunter.exe`. Tests: `cargo test`.
 
 ## License
 

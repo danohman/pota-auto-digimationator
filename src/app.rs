@@ -39,7 +39,7 @@ use crate::wsjtx_gui;
 use crate::wsjtx_udp::{self, Decode, ListenerShared, Message};
 use crate::{logdialog, respot, sound};
 
-pub const TITLE: &str = "POTA Auto-Digimationator";
+pub const TITLE: &str = "POTA FT-Hunter";
 pub const PAD: f32 = 12.0;
 /// corner radius of the cards
 const CARD_RADIUS: f32 = 6.0;
@@ -4053,7 +4053,7 @@ impl App {
                 }
                 "update" => {
                     let a = |n: &str| crate::update::Asset { name: n.into(), browser_url: String::new() };
-                    self.update = Some(crate::update::Release { version: "9.9.9".into(), page: String::new(), exe: a("pota-auto-digimationator.exe"), exe_sha: None });
+                    self.update = Some(crate::update::Release { version: "9.9.9".into(), page: String::new(), exe: a("pota-ft-hunter.exe"), exe_sha: None });
                 }
                 "hunt" => self.set_hunting(true),
                 "cq" => self.set_cq(true),

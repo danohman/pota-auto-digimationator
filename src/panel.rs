@@ -791,7 +791,7 @@ impl Panel {
         }
         l.section("About");
         l.y += 6.0;
-        self.about_text(l, "POTA Auto-Digimationator", AFont::UiBold, wrap, 0.0, 0.0, None);
+        self.about_text(l, "POTA FT-Hunter", AFont::UiBold, wrap, 0.0, 0.0, None);
         self.about_text(l, &format!("Version {}", env!("CARGO_PKG_VERSION")), AFont::SmallMuted, wrap, 0.0, 0.0, None);
         l.section("Donate");
         self.about_text(l, "If this program helps you, a donation is appreciated but never expected.", AFont::SmallMuted, wrap, 4.0, 2.0, None);

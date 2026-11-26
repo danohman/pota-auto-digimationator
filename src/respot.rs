@@ -25,7 +25,7 @@ pub const PLACEHOLDERS: &[(&str, &str)] = &[
 ];
 
 pub fn source() -> String {
-    format!("POTA Auto-Digimationator {}", env!("CARGO_PKG_VERSION"))
+    format!("POTA FT-Hunter {}", env!("CARGO_PKG_VERSION"))
 }
 
 /// What goes into one respot.
@@ -112,7 +112,7 @@ mod tests {
         assert_eq!(b["spotter"], "WD4DAN");
         assert_eq!(b["frequency"], "14074");
         assert_eq!(b["reference"], "US-1234");
-        assert_eq!(b["source"], format!("POTA Auto-Digimationator {}", env!("CARGO_PKG_VERSION")));
+        assert_eq!(b["source"], format!("POTA FT-Hunter {}", env!("CARGO_PKG_VERSION")));
         let c = b["comments"].as_str().unwrap();
         assert!(c.starts_with("Heard you -10, sent -05 on 20m FT8 14074 ("), "{c}");
         assert!(!c.contains('{'));

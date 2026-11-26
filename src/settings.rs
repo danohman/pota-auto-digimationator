@@ -238,7 +238,7 @@ fn norm(p: &str) -> String {
 }
 
 /// The folder for the files the app writes (settings, state, spot cache, crash logs):
-/// `%APPDATA%\pota-auto-digimationator`, or `data` under the app folder when
+/// `%APPDATA%\pota-ft-hunter`, or `data` under the app folder when
 /// `POTA_APP_DIR` is set (testing) or there is no %APPDATA%. Created if missing. The
 /// first time the AppData folder is used, the files of older versions are copied in
 /// from `<app folder>\data` (or the app folder itself); the old copies are left alone.
@@ -249,9 +249,24 @@ pub fn data_dir(app_dir: &Path) -> PathBuf {
         let old = app_dir.join("data");
         let appdata = std::env::var_os("APPDATA").filter(|_| std::env::var_os("POTA_APP_DIR").is_none());
         let data = match appdata {
-            Some(a) => PathBuf::from(a).join("pota-auto-digimationator"),
+            Some(a) => PathBuf::from(a).join("pota-ft-hunter"),
             None => old.clone(),
         };
+        // the program was called pota-auto-digimationator before it became POTA FT-Hunter: move that folder over
+        if data != old {
+            if let Some(legacy) = data.parent().map(|p| p.join("pota-auto-digimationator")).filter(|p| p.is_dir()) {
+                let _ = std::fs::create_dir_all(&data);
+                if let Ok(rd) = std::fs::read_dir(&legacy) {
+                    for e in rd.flatten() {
+                        let to = data.join(e.file_name());
+                        if !to.exists() {
+                            let _ = std::fs::rename(e.path(), to);
+                        }
+                    }
+                }
+                let _ = std::fs::remove_dir(&legacy); // only if now empty
+            }
+        }
         let _ = std::fs::create_dir_all(&data);
         if data != old {
             for name in ["settings.json", "state.json", "spots_cache.json"] {
