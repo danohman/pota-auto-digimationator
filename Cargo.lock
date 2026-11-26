@@ -2690,7 +2690,7 @@ dependencies = [
 
 [[package]]
 name = "pota-ft-hunter"
-version = "1.0.21-beta"
+version = "2.0.0"
 dependencies = [
  "base64",
  "chrono",
