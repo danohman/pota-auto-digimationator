@@ -2370,7 +2370,7 @@ impl App {
 
     fn header_height(&self) -> f32 {
         let f = &self.f;
-        let titles = f.title.m.linespace + 4.0 + f.small.m.linespace + 4.0;
+        let titles = f.title.m.linespace + 4.0;
         let btn = (f.icon.m.linespace + 18.0).max(f.toggle.m.linespace + 18.0);
         titles.max(36.0).max(btn) + 20.0
     }
@@ -2460,7 +2460,7 @@ impl App {
             self.toggle_cq();
         }
         // titles: only what fits left of the buttons
-        let th = f.title.m.linespace + 4.0 + f.small.m.linespace + 4.0;
+        let th = f.title.m.linespace + 4.0;
         let ty = center(th);
         let room = r.left() - 12.0 - (tx + 2.0);
         if measure(&f.title, TITLE) <= room {
@@ -2517,10 +2517,6 @@ impl App {
                         }
                     }
                 }
-            }
-            let sub = "Calls Parks on the Air activators through WSJT-X";
-            if measure(&f.small, sub) <= room {
-                ui::text(ui, &painter, Pos2::new(tx + 2.0, ty + f.title.m.linespace + 4.0 + 2.0), sub, &f.small, p.muted);
             }
         }
         hh + 1.0

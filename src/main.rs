@@ -108,7 +108,7 @@ fn main() -> eframe::Result {
     let done_fit = table_fit(f, &[&spot[..], &[("W/S", "W/S"), ("Park", PARK_SAMPLE)]].concat());
     let worked_fit = table_fit(f, &[("Time", "00:00"), ("Call", "JN1JYD/P2"), ("Band", "160m"), ("Mode", "FT8"), ("Log", "Log"), ("Park", PARK_SAMPLE)]);
     let right_w = spots_fit.max(done_fit).max(worked_fit) + scrollbar + 2.0;
-    let titles = measure(&f.title, TITLE).max(measure(&f.small, "Calls Parks on the Air activators through WSJT-X")) + 4.0;
+    let titles = measure(&f.title, TITLE) + 4.0;
     let toggle = |t: &str| measure(&f.toggle, t) + 20.0;
     let icon_btn = measure(&f.icon, theme::ICON_SETTINGS) + 22.0;
     let header = 32.0 + 36.0 + 12.0 + titles + icon_btn + icon_btn + 8.0
